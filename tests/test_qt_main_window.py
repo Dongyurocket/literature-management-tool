@@ -74,6 +74,31 @@ class QtMainWindowAsyncTests(unittest.TestCase):
                 self.assertEqual(window.busy_label.text(), "就绪")
                 self.assertNotIn("正在下载更新包", window.statusBar().currentMessage())
 
+    def test_refresh_literature_list_provides_feedback_and_keeps_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                literature_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "刷新测试",
+                        "authors": ["Alice"],
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
+                toasts: list[tuple[str, str, str]] = []
+
+                def capture_toast(title: str, message: str, *, level: str = "info", duration_ms: int = 3200) -> None:
+                    toasts.append((title, message, level))
+
+                window._show_toast = capture_toast  # type: ignore[method-assign]
+                with run_async_immediately(window):
+                    window._refresh_literature_list()
+
+                self.assertEqual(window.busy_label.text(), "就绪")
+                self.assertEqual(window._current_literature_id, literature_id)
+                self.assertTrue(any(title == "列表已刷新" for title, _message, _level in toasts))
+
     def test_busy_state_is_cleared_before_result_callback(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_window(Path(tmp)) as window:
@@ -164,6 +189,16 @@ class QtMainWindowAsyncTests(unittest.TestCase):
                         for title, message, level in toasts
                     )
                 )
+
+    def test_stale_busy_state_guard_recovers_when_no_active_threads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                token = window._begin_busy_task("正在检查 GitHub 更新…")
+                window._busy_task_started_at[token] = time.monotonic() - 10
+                with mock.patch.object(window._thread_pool, "activeThreadCount", return_value=0):
+                    window._recover_stale_busy_state()
+                self.assertEqual(window.busy_label.text(), "就绪")
+                self.assertFalse(window._busy_tasks)
 
 
 class QtMainWindowMetadataTests(unittest.TestCase):

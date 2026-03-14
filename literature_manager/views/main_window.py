@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import time
 import traceback
 import webbrowser
 from pathlib import Path
@@ -116,6 +117,11 @@ class QtMainWindow(QMainWindow):
         self._thread_pool = QThreadPool.globalInstance()
         self._busy_tasks: list[tuple[int, str]] = []
         self._busy_task_seq = 0
+        self._busy_task_started_at: dict[int, float] = {}
+        self._busy_state_guard_timer = QTimer(self)
+        self._busy_state_guard_timer.setInterval(1500)
+        self._busy_state_guard_timer.timeout.connect(self._recover_stale_busy_state)
+        self._busy_state_guard_timer.start()
 
         self._metadata_save_timer = QTimer(self)
         self._metadata_save_timer.setInterval(650)
@@ -165,6 +171,7 @@ class QtMainWindow(QMainWindow):
     def _bind_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
         QShortcut(QKeySequence("Ctrl+Shift+F"), self, activated=self._open_search_center)
+        QShortcut(QKeySequence("F5"), self, activated=self._refresh_literature_list)
 
     def _focus_search(self) -> None:
         self.search_bar.line_edit.setFocus()
@@ -189,12 +196,35 @@ class QtMainWindow(QMainWindow):
         self._busy_task_seq += 1
         token = self._busy_task_seq
         self._busy_tasks.append((token, message or "正在处理…"))
+        self._busy_task_started_at[token] = time.monotonic()
         self._refresh_busy_state()
         return token
 
     def _end_busy_task(self, token: int) -> None:
         self._busy_tasks = [item for item in self._busy_tasks if item[0] != token]
+        self._busy_task_started_at.pop(token, None)
         self._refresh_busy_state()
+
+    def _recover_stale_busy_state(self) -> None:
+        if not self._busy_tasks:
+            return
+        if self._thread_pool.activeThreadCount() > 0:
+            return
+        now = time.monotonic()
+        stale_tokens = [
+            token
+            for token, _message in self._busy_tasks
+            if now - self._busy_task_started_at.get(token, now) >= 6.0
+        ]
+        if not stale_tokens:
+            return
+        stale_set = set(stale_tokens)
+        self._busy_tasks = [item for item in self._busy_tasks if item[0] not in stale_set]
+        for token in stale_tokens:
+            self._busy_task_started_at.pop(token, None)
+        self._refresh_busy_state()
+        if not self._busy_tasks:
+            self.statusBar().showMessage("后台任务状态已自动恢复。", 3000)
 
     def _run_ui_callback(self, callback, *args, error_title: str) -> None:
         if callback is None:
@@ -393,6 +423,10 @@ class QtMainWindow(QMainWindow):
         search_button = QPushButton("全文检索", self)
         search_button.clicked.connect(self._open_search_center)
         controls.addWidget(search_button)
+
+        refresh_button = QPushButton("刷新列表", self)
+        refresh_button.clicked.connect(self._refresh_literature_list)
+        controls.addWidget(refresh_button)
 
         update_button = QPushButton("检查更新", self)
         update_button.clicked.connect(self._check_updates)
@@ -1136,6 +1170,26 @@ class QtMainWindow(QMainWindow):
             controller_task=lambda controller: controller.check_for_updates(),
             on_result=handle_result,
             error_title="检查更新失败",
+        )
+
+    def _refresh_literature_list(self) -> None:
+        preserve_id = self._current_literature_id
+        navigation_key = self._current_navigation_key()
+        if self._metadata_save_timer.isActive():
+            self._metadata_save_timer.stop()
+            self._save_metadata_changes()
+
+        def handle_result(_result) -> None:
+            self._show_toast("列表已刷新", "文献列表与统计信息已更新。", level="info")
+
+        self._run_controller_task(
+            label="正在刷新文献列表…",
+            controller_task=lambda controller: True,
+            on_result=handle_result,
+            reload_after=True,
+            refresh_after=True,
+            preserve_id=preserve_id,
+            error_title="刷新列表失败",
         )
 
     def _open_library_profiles(self) -> None:
