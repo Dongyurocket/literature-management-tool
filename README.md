@@ -10,6 +10,10 @@
 仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)
 
+![Project cover](docs/social-preview.png)
+
+说明：README 与 Release 中使用的界面截图已对本地路径等隐私地址做打码处理。
+
 ## 为什么做这个工具
 
 很多轻量文献工具只能保存标题和 PDF，难以覆盖国内常用的 GB/T 7714-2015 参考文献整理需求，也不方便把原文、翻译稿、阅读笔记、导出文件统一管理。本项目重点解决以下问题：
