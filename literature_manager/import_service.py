@@ -25,10 +25,15 @@ def iter_supported_files(paths: list[str], recursive: bool = True) -> list[Path]
     return list(unique.values())
 
 
-def scan_import_sources(paths: list[str], recursive: bool = True) -> list[dict]:
+def scan_import_sources(
+    paths: list[str],
+    recursive: bool = True,
+    *,
+    settings: AppSettings | None = None,
+) -> list[dict]:
     items: list[dict] = []
     for file_path in iter_supported_files(paths, recursive=recursive):
-        for item in scan_file(file_path):
+        for item in scan_file(file_path, settings=settings):
             payload = item["payload"]
             items.append(
                 {

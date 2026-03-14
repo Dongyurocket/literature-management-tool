@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .. import __version__
 from ..config import AppSettings, SettingsStore
 from ..db import LibraryDatabase
 from ..dedupe_service import find_duplicate_groups, merge_literatures
+from ..export_service import (
+    export_statistics_report,
+    export_template_file,
+    list_export_templates,
+    list_report_templates,
+    suggested_extension,
+)
 from ..import_service import import_scanned_items, scan_import_sources
 from ..maintenance_service import create_backup, find_missing_paths, repair_missing_paths, restore_backup
-from ..metadata_service import lookup_doi, lookup_isbn
+from ..metadata_service import lookup_doi, lookup_isbn, lookup_title_metadata
+from ..ocr_service import install_umi_ocr
+from ..update_service import check_latest_release, download_release_asset
 from ..utils import build_csl_entry, build_gbt_reference
 
 
@@ -32,7 +43,45 @@ class LibraryController:
         return LibraryDatabase(
             self.settings_store.database_path,
             lambda: self.settings.library_root,
+            lambda: self.settings,
         )
+
+    def _preferred_metadata_sources(self) -> list[str]:
+        return list(self.settings.metadata_sources or [])
+
+    @staticmethod
+    def _normalize_statistics_labels(stats: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(stats)
+
+        def normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            normalized: list[dict[str, Any]] = []
+            for item in items:
+                row = dict(item)
+                label = str(row.get("label", "") or "")
+                if any(token in label for token in ["鏈", "娉", "绫"]):
+                    if row in stats.get("by_year", []):
+                        row["label"] = "未标注"
+                    elif row in stats.get("by_subject", []):
+                        row["label"] = "未分类"
+                    else:
+                        row["label"] = "未标注"
+                normalized.append(row)
+            return normalized
+
+        payload["by_year"] = normalize_items(list(stats.get("by_year", [])))
+        payload["by_subject"] = normalize_items(list(stats.get("by_subject", [])))
+        payload["by_status"] = normalize_items(list(stats.get("by_status", [])))
+        return payload
+
+    @staticmethod
+    def _is_doi(identifier: str) -> bool:
+        text = identifier.strip().lower()
+        return text.startswith("10.") or "doi.org/" in text
+
+    @staticmethod
+    def _is_isbn(identifier: str) -> bool:
+        normalized = re.sub(r"[^0-9Xx]", "", identifier or "")
+        return len(normalized) in {10, 13}
 
     def close(self) -> None:
         self.database.close()
@@ -58,6 +107,45 @@ class LibraryController:
         self.settings.ui_theme = normalized
         self.settings_store.save(self.settings)
         return normalized
+
+    def current_library_profile(self) -> dict[str, Any]:
+        profile = self.settings_store.current_profile()
+        summary = next(
+            (item for item in self.settings_store.profile_summary() if item["name"] == profile.name),
+            None,
+        )
+        return summary or {
+            "name": profile.name,
+            "slug": profile.slug,
+            "archived": profile.archived,
+            "active": True,
+            "database_path": str(self.settings_store.database_path),
+            "settings_path": str(self.settings_store.settings_path),
+            "library_root": self.settings.library_root,
+        }
+
+    def list_library_profiles(self, *, include_archived: bool = True) -> list[dict[str, Any]]:
+        return self.settings_store.profile_summary(include_archived=include_archived)
+
+    def create_library_profile(self, name: str) -> dict[str, Any]:
+        profile = self.settings_store.create_profile(name, template_settings=self.settings)
+        return next(
+            item for item in self.settings_store.profile_summary() if item["name"] == profile.name
+        )
+
+    def switch_library_profile(self, name: str) -> dict[str, Any]:
+        self.settings_store.switch_profile(name)
+        self.settings = self.settings_store.load()
+        self.reload_database()
+        return self.current_library_profile()
+
+    def set_library_archived(self, name: str, archived: bool) -> dict[str, Any]:
+        self.settings_store.set_profile_archived(name, archived)
+        self.settings = self.settings_store.load()
+        self.reload_database()
+        return next(
+            item for item in self.settings_store.profile_summary() if item["name"] == name
+        )
 
     def list_filter_values(self) -> dict[str, list[str]]:
         return self.database.list_filter_values()
@@ -108,6 +196,22 @@ class LibraryController:
     def delete_attachment(self, attachment_id: int, *, delete_file: bool) -> None:
         self.database.delete_attachment(attachment_id, delete_file=delete_file)
 
+    def reextract_attachment_texts(self, attachment_ids: list[int]) -> dict[str, int]:
+        updated = 0
+        skipped = 0
+        for attachment_id in attachment_ids:
+            attachment = self.get_attachment(attachment_id)
+            if not attachment:
+                skipped += 1
+                continue
+            path = str(attachment.get("resolved_path", ""))
+            if not path.lower().endswith(".pdf"):
+                skipped += 1
+                continue
+            self.database.refresh_attachment_text(attachment_id)
+            updated += 1
+        return {"updated": updated, "skipped": skipped}
+
     def get_note(self, note_id: int) -> dict[str, Any] | None:
         return self.database.get_note(note_id)
 
@@ -121,7 +225,7 @@ class LibraryController:
         return self.database.search_literatures(query, limit=limit)
 
     def get_statistics(self) -> dict[str, Any]:
-        return self.database.get_statistics()
+        return self._normalize_statistics_labels(self.database.get_statistics())
 
     def rebuild_search_index(self) -> None:
         self.database.rebuild_search_index()
@@ -135,7 +239,7 @@ class LibraryController:
         )
 
     def scan_import_sources(self, paths: list[str], *, recursive: bool = True) -> list[dict[str, Any]]:
-        return scan_import_sources(paths, recursive=recursive)
+        return scan_import_sources(paths, recursive=recursive, settings=self.settings)
 
     def import_paths(
         self,
@@ -156,12 +260,36 @@ class LibraryController:
         detail = self.get_literature(literature_id)
         if not detail:
             return None, None
-        identifier = detail.get("doi") or detail.get("isbn") or manual_identifier.strip()
-        if not identifier:
-            raise ValueError("请输入 DOI 或 ISBN。")
-        if str(identifier).lower().startswith("10."):
-            return detail, lookup_doi(str(identifier))
-        return detail, lookup_isbn(str(identifier))
+
+        preferred_sources = self._preferred_metadata_sources()
+        identifier = (detail.get("doi") or detail.get("isbn") or manual_identifier).strip()
+        errors: list[str] = []
+
+        if identifier:
+            try:
+                if self._is_doi(identifier):
+                    return detail, lookup_doi(identifier, preferred_sources=preferred_sources)
+                if self._is_isbn(identifier):
+                    return detail, lookup_isbn(identifier, preferred_sources=preferred_sources)
+                raise ValueError("请输入合法的 DOI 或 ISBN。")
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        try:
+            payload = lookup_title_metadata(
+                detail.get("title", ""),
+                authors=detail.get("authors", []),
+                year=detail.get("year"),
+                preferred_sources=preferred_sources,
+            )
+            if errors:
+                payload["metadata_lookup_notice"] = "标识符查询失败，已回退到标题检索。"
+                payload["metadata_lookup_errors"] = errors
+            return detail, payload
+        except ValueError as exc:
+            errors.append(str(exc))
+
+        raise ValueError("；".join(errors) or "无法获取文献元数据。")
 
     def merge_metadata_payload(self, current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
         payload = dict(current)
@@ -234,6 +362,39 @@ class LibraryController:
         self.settings_store.save(self.settings)
         return len(entries)
 
+    def list_export_templates(self) -> dict[str, str]:
+        return list_export_templates()
+
+    def list_report_templates(self) -> dict[str, str]:
+        return list_report_templates()
+
+    def suggested_export_extension(self, template_key: str) -> str:
+        return suggested_extension(template_key)
+
+    def export_template(self, literature_ids: list[int], template_key: str, destination: str) -> str:
+        literatures = [self.get_literature(item_id) for item_id in literature_ids]
+        payload = [item for item in literatures if item]
+        path = export_template_file(
+            template_key,
+            payload,
+            destination,
+            library_name=self.current_library_profile().get("name", ""),
+        )
+        self.settings.recent_export_dir = str(Path(path).parent)
+        self.settings_store.save(self.settings)
+        return path
+
+    def export_statistics(self, template_key: str, destination: str) -> str:
+        path = export_statistics_report(
+            template_key,
+            self.get_statistics(),
+            destination,
+            library_name=self.current_library_profile().get("name", ""),
+        )
+        self.settings.recent_export_dir = str(Path(path).parent)
+        self.settings_store.save(self.settings)
+        return path
+
     def build_gbt_references(self, literature_ids: list[int]) -> list[str]:
         references: list[str] = []
         for literature_id in literature_ids:
@@ -247,3 +408,19 @@ class LibraryController:
 
     def apply_pdf_renames(self, previews: list[dict[str, Any]]) -> int:
         return self.database.apply_pdf_renames(previews)
+
+    def install_umi_ocr(self) -> dict[str, Any]:
+        result = install_umi_ocr(self.settings)
+        self.settings_store.save(self.settings)
+        return result
+
+    def check_for_updates(self) -> dict[str, Any]:
+        return check_latest_release(self.settings.update_repo, __version__)
+
+    def download_update(self, release_info: dict[str, Any], destination_dir: str) -> str:
+        asset_url = str(release_info.get("asset_url", "")).strip()
+        asset_name = str(release_info.get("asset_name", "")).strip() or "LiteratureManagementTool-Setup.exe"
+        if not asset_url:
+            raise ValueError("当前发布没有可下载的安装包。")
+        target = Path(destination_dir).expanduser().resolve() / asset_name
+        return download_release_asset(asset_url, target)

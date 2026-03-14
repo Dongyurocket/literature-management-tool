@@ -7,20 +7,36 @@ from urllib import error, parse, request
 
 from pypdf import PdfReader
 
+from .config import AppSettings
+from .ocr_service import extract_pdf_text_with_ocr
 from .utils import detect_note_format, extract_year, normalize_for_compare, sanitize_filename
 
-CROSSREF_BASE = "https://api.crossref.org/works/"
+CROSSREF_WORK = "https://api.crossref.org/works/{doi}"
+CROSSREF_SEARCH = "https://api.crossref.org/works?rows=1&query.bibliographic={query}"
+DATACITE_DOI = "https://api.datacite.org/dois/{doi}"
 OPENLIBRARY_BOOKS = "https://openlibrary.org/api/books"
+OPENALEX_WORKS = "https://api.openalex.org/works?per-page=1&filter={query}"
+OPENALEX_SEARCH = "https://api.openalex.org/works?per-page=1&search={query}"
+GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}&maxResults=1"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.2 (local desktop app)",
+    "User-Agent": "LiteratureManagementTool/0.3.0",
     "Accept": "application/json",
 }
 
 
 def _get_json(url: str) -> dict:
     req = request.Request(url, headers=HTTP_HEADERS)
-    with request.urlopen(req, timeout=12) as response:
+    with request.urlopen(req, timeout=15) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _safe_get_json(url: str) -> dict:
+    try:
+        return _get_json(url)
+    except error.HTTPError as exc:
+        raise ValueError(f"HTTP {exc.code}") from exc
+    except error.URLError as exc:
+        raise ValueError(str(exc.reason)) from exc
 
 
 def _authors_from_crossref(message: dict) -> list[str]:
@@ -31,6 +47,25 @@ def _authors_from_crossref(message: dict) -> list[str]:
         full = " ".join(part for part in (given, family) if part).strip()
         if full:
             authors.append(full)
+    return authors
+
+
+def _authors_from_openalex(item: dict) -> list[str]:
+    authors: list[str] = []
+    for authorship in item.get("authorships", []):
+        author = authorship.get("author", {})
+        name = (author.get("display_name") or "").strip()
+        if name:
+            authors.append(name)
+    return authors
+
+
+def _authors_from_datacite(payload: dict) -> list[str]:
+    authors: list[str] = []
+    for creator in payload.get("creators", []):
+        name = (creator.get("name") or "").strip()
+        if name:
+            authors.append(name)
     return authors
 
 
@@ -56,8 +91,6 @@ def _payload_from_crossref(message: dict) -> dict:
     abstract = re.sub(r"<[^>]+>", " ", message.get("abstract", "") or "").strip()
     keywords = ", ".join(message.get("subject", []))
     container_title = " ".join(message.get("container-title", [])).strip()
-    pages = message.get("page", "")
-    doi = message.get("DOI", "")
     return {
         "entry_type": _map_crossref_type(message.get("type", "")),
         "title": title,
@@ -68,9 +101,9 @@ def _payload_from_crossref(message: dict) -> dict:
         "year": year,
         "volume": message.get("volume", ""),
         "issue": message.get("issue", ""),
-        "pages": pages,
-        "doi": doi,
-        "url": (message.get("URL") or ""),
+        "pages": message.get("page", ""),
+        "doi": message.get("DOI", ""),
+        "url": message.get("URL", ""),
         "language": message.get("language", ""),
         "keywords": keywords,
         "abstract": abstract,
@@ -81,57 +114,282 @@ def _payload_from_crossref(message: dict) -> dict:
     }
 
 
-def lookup_doi(doi: str) -> dict:
-    normalized = (doi or "").strip()
-    if not normalized:
-        raise ValueError("缺少 DOI")
-    normalized = normalized.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
-    url = CROSSREF_BASE + parse.quote(normalized)
-    try:
-        payload = _get_json(url)
-    except error.HTTPError as exc:
-        raise ValueError(f"DOI 查询失败：HTTP {exc.code}") from exc
-    except error.URLError as exc:
-        raise ValueError(f"DOI 查询失败：{exc.reason}") from exc
-    message = payload.get("message")
-    if not isinstance(message, dict):
-        raise ValueError("DOI 查询返回了无效数据")
-    result = _payload_from_crossref(message)
-    result["doi"] = normalized
-    return result
+def _payload_from_datacite(attributes: dict) -> dict:
+    titles = attributes.get("titles", [])
+    title = titles[0].get("title", "") if titles else ""
+    descriptions = attributes.get("descriptions", [])
+    abstract = ""
+    for item in descriptions:
+        description = item.get("description")
+        if description:
+            abstract = str(description)
+            break
+    subjects: list[str] = []
+    for item in attributes.get("subjects", []):
+        if isinstance(item, dict) and item.get("subject"):
+            subjects.append(str(item["subject"]))
+        elif isinstance(item, str):
+            subjects.append(item)
+    return {
+        "entry_type": _map_crossref_type(str(attributes.get("types", {}).get("resourceTypeGeneral", "")).lower()),
+        "title": title,
+        "translated_title": "",
+        "publication_title": attributes.get("container", {}).get("title", ""),
+        "publisher": attributes.get("publisher", ""),
+        "year": extract_year(str(attributes.get("publicationYear", ""))),
+        "doi": attributes.get("doi", ""),
+        "url": attributes.get("url", ""),
+        "language": attributes.get("language", ""),
+        "keywords": ", ".join(subjects),
+        "abstract": abstract,
+        "summary": abstract[:240],
+        "authors": _authors_from_datacite(attributes),
+        "tags": [],
+        "source_provider": "DataCite",
+    }
 
 
-def lookup_isbn(isbn: str) -> dict:
-    normalized = re.sub(r"[^0-9Xx]", "", isbn or "")
-    if not normalized:
-        raise ValueError("缺少 ISBN")
-    query = parse.urlencode({"bibkeys": f"ISBN:{normalized}", "format": "json", "jscmd": "data"})
-    try:
-        payload = _get_json(f"{OPENLIBRARY_BOOKS}?{query}")
-    except error.URLError as exc:
-        raise ValueError(f"ISBN 查询失败：{exc.reason}") from exc
-    book = payload.get(f"ISBN:{normalized}")
-    if not isinstance(book, dict):
-        raise ValueError("没有找到对应的 ISBN 数据")
+def _payload_from_openalex(item: dict) -> dict:
+    location = item.get("primary_location") or {}
+    source = location.get("source") or {}
+    title = (item.get("display_name") or "").strip()
+    abstract = ""
+    if isinstance(item.get("abstract_inverted_index"), dict):
+        pairs: list[tuple[int, str]] = []
+        for word, positions in item["abstract_inverted_index"].items():
+            for position in positions:
+                pairs.append((int(position), word))
+        pairs.sort(key=lambda pair: pair[0])
+        abstract = " ".join(word for _position, word in pairs)
+    return {
+        "entry_type": _map_crossref_type(item.get("type", "")),
+        "title": title,
+        "translated_title": "",
+        "publication_title": source.get("display_name", ""),
+        "publisher": source.get("host_organization_name", ""),
+        "conference_name": source.get("display_name", "") if item.get("type") == "proceedings-article" else "",
+        "year": item.get("publication_year"),
+        "volume": item.get("biblio", {}).get("volume", ""),
+        "issue": item.get("biblio", {}).get("issue", ""),
+        "pages": "-".join(
+            part
+            for part in [
+                item.get("biblio", {}).get("first_page", ""),
+                item.get("biblio", {}).get("last_page", ""),
+            ]
+            if part
+        ),
+        "doi": (item.get("doi") or "").replace("https://doi.org/", ""),
+        "url": item.get("id", ""),
+        "language": item.get("language", ""),
+        "keywords": ", ".join(
+            keyword.get("display_name", "")
+            for keyword in item.get("keywords", [])
+            if keyword.get("display_name")
+        ),
+        "abstract": abstract,
+        "summary": abstract[:240],
+        "authors": _authors_from_openalex(item),
+        "tags": [],
+        "source_provider": "OpenAlex",
+    }
+
+
+def _payload_from_openlibrary(book: dict, normalized: str) -> dict:
     title = book.get("title", "")
     subtitle = book.get("subtitle", "")
     publish_date = book.get("publish_date", "")
     publishers = ", ".join(item.get("name", "") for item in book.get("publishers", []))
     authors = [item.get("name", "") for item in book.get("authors", []) if item.get("name")]
-    year = extract_year(publish_date)
+    notes = book.get("notes")
+    summary = notes if isinstance(notes, str) else ""
     return {
         "entry_type": "book",
         "title": title,
         "translated_title": subtitle,
         "publisher": publishers,
-        "year": year,
+        "year": extract_year(publish_date),
         "isbn": normalized,
         "url": book.get("url", ""),
         "authors": authors,
         "tags": [],
-        "summary": (book.get("notes") or "")[:240],
+        "summary": summary[:240],
         "source_provider": "OpenLibrary",
     }
+
+
+def _payload_from_google_books(item: dict, normalized: str) -> dict:
+    info = item.get("volumeInfo", {})
+    industry_ids = info.get("industryIdentifiers", [])
+    isbn = normalized
+    for identifier in industry_ids:
+        if str(identifier.get("type", "")).upper().startswith("ISBN"):
+            isbn = identifier.get("identifier", normalized)
+            break
+    description = info.get("description", "")
+    return {
+        "entry_type": "book",
+        "title": info.get("title", ""),
+        "translated_title": info.get("subtitle", ""),
+        "publisher": info.get("publisher", ""),
+        "year": extract_year(info.get("publishedDate", "")),
+        "isbn": isbn,
+        "url": info.get("infoLink", ""),
+        "authors": info.get("authors", []),
+        "language": info.get("language", ""),
+        "tags": [],
+        "summary": description[:240],
+        "abstract": description,
+        "source_provider": "Google Books",
+    }
+
+
+def _lookup_doi_crossref(doi: str) -> dict:
+    payload = _safe_get_json(CROSSREF_WORK.format(doi=parse.quote(doi)))
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("Crossref 返回数据无效")
+    result = _payload_from_crossref(message)
+    result["doi"] = doi
+    return result
+
+
+def _lookup_doi_datacite(doi: str) -> dict:
+    payload = _safe_get_json(DATACITE_DOI.format(doi=parse.quote(doi)))
+    attributes = payload.get("data", {}).get("attributes")
+    if not isinstance(attributes, dict):
+        raise ValueError("DataCite 返回数据无效")
+    result = _payload_from_datacite(attributes)
+    result["doi"] = doi
+    return result
+
+
+def _lookup_doi_openalex(doi: str) -> dict:
+    query = parse.quote(f"doi:https://doi.org/{doi}", safe=":/")
+    payload = _safe_get_json(OPENALEX_WORKS.format(query=query))
+    results = payload.get("results", [])
+    if not results:
+        raise ValueError("OpenAlex 未找到结果")
+    result = _payload_from_openalex(results[0])
+    result["doi"] = doi
+    return result
+
+
+def _lookup_isbn_openlibrary(isbn: str) -> dict:
+    query = parse.urlencode({"bibkeys": f"ISBN:{isbn}", "format": "json", "jscmd": "data"})
+    payload = _safe_get_json(f"{OPENLIBRARY_BOOKS}?{query}")
+    book = payload.get(f"ISBN:{isbn}")
+    if not isinstance(book, dict):
+        raise ValueError("OpenLibrary 未找到结果")
+    return _payload_from_openlibrary(book, isbn)
+
+
+def _lookup_isbn_googlebooks(isbn: str) -> dict:
+    payload = _safe_get_json(GOOGLE_BOOKS.format(isbn=parse.quote(isbn)))
+    items = payload.get("items", [])
+    if not items:
+        raise ValueError("Google Books 未找到结果")
+    return _payload_from_google_books(items[0], isbn)
+
+
+def _lookup_title_openalex(title: str, authors: list[str], year: int | None) -> dict:
+    query_parts = [title.strip()]
+    if authors:
+        query_parts.append(authors[0])
+    if year:
+        query_parts.append(str(year))
+    payload = _safe_get_json(OPENALEX_SEARCH.format(query=parse.quote(" ".join(query_parts))))
+    results = payload.get("results", [])
+    if not results:
+        raise ValueError("OpenAlex 未找到匹配结果")
+    return _payload_from_openalex(results[0])
+
+
+def _lookup_title_crossref(title: str, authors: list[str], year: int | None) -> dict:
+    query_parts = [title.strip()]
+    if authors:
+        query_parts.append(authors[0])
+    if year:
+        query_parts.append(str(year))
+    payload = _safe_get_json(CROSSREF_SEARCH.format(query=parse.quote(" ".join(query_parts))))
+    items = payload.get("message", {}).get("items", [])
+    if not items:
+        raise ValueError("Crossref 未找到匹配结果")
+    return _payload_from_crossref(items[0])
+
+
+def _provider_chain(preferred_sources: list[str] | None, supported: list[str]) -> list[str]:
+    if not preferred_sources:
+        return supported
+    ordered = [item for item in preferred_sources if item in supported]
+    return ordered or supported
+
+
+def lookup_doi(doi: str, preferred_sources: list[str] | None = None) -> dict:
+    normalized = (doi or "").strip()
+    if not normalized:
+        raise ValueError("缺少 DOI。")
+    normalized = normalized.replace("https://doi.org/", "").replace("http://doi.org/", "").strip()
+    providers = {
+        "crossref": _lookup_doi_crossref,
+        "datacite": _lookup_doi_datacite,
+        "openalex": _lookup_doi_openalex,
+    }
+    errors: list[str] = []
+    chain = _provider_chain(preferred_sources, list(providers))
+    for provider_name in chain:
+        try:
+            payload = providers[provider_name](normalized)
+            payload["metadata_fallback_chain"] = chain
+            return payload
+        except ValueError as exc:
+            errors.append(f"{provider_name}: {exc}")
+    raise ValueError("DOI 查询失败：" + "；".join(errors))
+
+
+def lookup_isbn(isbn: str, preferred_sources: list[str] | None = None) -> dict:
+    normalized = re.sub(r"[^0-9Xx]", "", isbn or "")
+    if not normalized:
+        raise ValueError("缺少 ISBN。")
+    providers = {
+        "openlibrary": _lookup_isbn_openlibrary,
+        "googlebooks": _lookup_isbn_googlebooks,
+    }
+    errors: list[str] = []
+    chain = _provider_chain(preferred_sources, list(providers))
+    for provider_name in chain:
+        try:
+            payload = providers[provider_name](normalized)
+            payload["metadata_fallback_chain"] = chain
+            return payload
+        except ValueError as exc:
+            errors.append(f"{provider_name}: {exc}")
+    raise ValueError("ISBN 查询失败：" + "；".join(errors))
+
+
+def lookup_title_metadata(
+    title: str,
+    authors: list[str] | None = None,
+    year: int | None = None,
+    preferred_sources: list[str] | None = None,
+) -> dict:
+    text = (title or "").strip()
+    if not text:
+        raise ValueError("缺少标题，无法执行标题回退查询。")
+    providers = {
+        "openalex": lambda: _lookup_title_openalex(text, authors or [], year),
+        "crossref": lambda: _lookup_title_crossref(text, authors or [], year),
+    }
+    errors: list[str] = []
+    chain = _provider_chain(preferred_sources, list(providers))
+    for provider_name in chain:
+        try:
+            payload = providers[provider_name]()
+            payload["metadata_fallback_chain"] = chain
+            return payload
+        except ValueError as exc:
+            errors.append(f"{provider_name}: {exc}")
+    raise ValueError("标题回退查询失败：" + "；".join(errors))
 
 
 def _parse_bib_fields(raw_fields: str) -> dict[str, str]:
@@ -158,7 +416,7 @@ def parse_bib_text(content: str) -> list[dict]:
         if not header_match:
             continue
         entry_type, cite_key = header_match.groups()
-        body = part[header_match.end():].rstrip().rstrip("}")
+        body = part[header_match.end() :].rstrip().rstrip("}")
         fields = _parse_bib_fields(body)
         authors = [item.strip() for item in re.split(r"\s+and\s+", fields.get("author", "")) if item.strip()]
         publication_title = fields.get("journal") or fields.get("booktitle", "")
@@ -287,7 +545,7 @@ def parse_reference_file(path: str | Path) -> list[dict]:
         return parse_bib_text(content)
     if file_path.suffix.lower() == ".ris":
         return parse_ris_text(content)
-    raise ValueError("暂不支持该引用文件格式")
+    raise ValueError("暂不支持该引文文件格式。")
 
 
 def infer_title_from_filename(path: str | Path) -> str:
@@ -313,11 +571,10 @@ def extract_pdf_text(path: str | Path, max_pages: int = 6) -> str:
     return "\n".join(chunks)
 
 
-def infer_pdf_metadata(path: str | Path) -> dict:
+def infer_pdf_metadata(path: str | Path, settings: AppSettings | None = None) -> dict:
     file_path = Path(path)
     title = ""
     authors: list[str] = []
-    summary = ""
     year = extract_year(file_path.stem)
     doi = ""
     try:
@@ -331,6 +588,8 @@ def infer_pdf_metadata(path: str | Path) -> dict:
         pass
 
     extracted_text = extract_pdf_text(file_path)
+    if settings is not None:
+        extracted_text = extract_pdf_text_with_ocr(file_path, extracted_text, settings)
     if not title:
         title = infer_title_from_filename(file_path)
     if not year:
@@ -339,7 +598,7 @@ def infer_pdf_metadata(path: str | Path) -> dict:
     if doi_match:
         doi = doi_match.group(0)
     summary = " ".join(extracted_text.split())[:280]
-    return {
+    payload = {
         "entry_type": "journal_article",
         "title": title,
         "year": year,
@@ -350,9 +609,12 @@ def infer_pdf_metadata(path: str | Path) -> dict:
         "tags": [],
         "source_provider": "PDF",
     }
+    if settings is not None and extracted_text.strip():
+        payload["ocr_text_preview"] = summary
+    return payload
 
 
-def scan_file(path: str | Path) -> list[dict]:
+def scan_file(path: str | Path, settings: AppSettings | None = None) -> list[dict]:
     file_path = Path(path)
     suffix = file_path.suffix.lower()
     if suffix in {".bib", ".ris"}:
@@ -367,7 +629,7 @@ def scan_file(path: str | Path) -> list[dict]:
             for entry in parse_reference_file(file_path)
         ]
     if suffix == ".pdf":
-        payload = infer_pdf_metadata(file_path)
+        payload = infer_pdf_metadata(file_path, settings=settings)
         return [
             {
                 "kind": "file_record",

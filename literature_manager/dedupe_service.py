@@ -5,6 +5,49 @@ from typing import Any
 from .db import LibraryDatabase
 from .metadata_service import normalized_title_key
 
+MERGE_TEXT_FIELDS = [
+    "translated_title",
+    "publication_title",
+    "publisher",
+    "school",
+    "conference_name",
+    "standard_number",
+    "patent_number",
+    "month",
+    "volume",
+    "issue",
+    "pages",
+    "doi",
+    "isbn",
+    "url",
+    "language",
+    "country",
+    "subject",
+    "keywords",
+    "summary",
+    "abstract",
+    "reading_status",
+    "remarks",
+    "cite_key",
+]
+
+COMPARE_FIELDS = [
+    ("title", "标题"),
+    ("translated_title", "译题"),
+    ("authors", "作者"),
+    ("year", "年份"),
+    ("publication_title", "刊名/书名"),
+    ("publisher", "出版社"),
+    ("school", "学校"),
+    ("conference_name", "会议"),
+    ("doi", "DOI"),
+    ("isbn", "ISBN"),
+    ("subject", "主题"),
+    ("keywords", "关键词"),
+    ("summary", "简介"),
+    ("reading_status", "阅读状态"),
+]
+
 
 def find_duplicate_groups(database: LibraryDatabase) -> list[dict[str, Any]]:
     literatures = database.list_literatures()
@@ -38,35 +81,10 @@ def find_duplicate_groups(database: LibraryDatabase) -> list[dict[str, Any]]:
     return groups
 
 
-def _merged_payload(primary: dict[str, Any], others: list[dict[str, Any]]) -> dict[str, Any]:
+def build_merge_preview(primary: dict[str, Any], others: list[dict[str, Any]]) -> dict[str, Any]:
     payload = dict(primary)
-    text_fields = [
-        "translated_title",
-        "publication_title",
-        "publisher",
-        "school",
-        "conference_name",
-        "standard_number",
-        "patent_number",
-        "month",
-        "volume",
-        "issue",
-        "pages",
-        "doi",
-        "isbn",
-        "url",
-        "language",
-        "country",
-        "subject",
-        "keywords",
-        "summary",
-        "abstract",
-        "reading_status",
-        "remarks",
-        "cite_key",
-    ]
     for other in others:
-        for field in text_fields:
+        for field in MERGE_TEXT_FIELDS:
             if not payload.get(field) and other.get(field):
                 payload[field] = other.get(field)
         if not payload.get("year") and other.get("year"):
@@ -91,20 +109,26 @@ def _merged_payload(primary: dict[str, Any], others: list[dict[str, Any]]) -> di
 def merge_literatures(database: LibraryDatabase, primary_id: int, merged_ids: list[int], reason: str) -> None:
     primary = database.get_literature(primary_id)
     if not primary:
-        raise ValueError("主文献不存在")
+        raise ValueError("主文献不存在。")
 
     others = [database.get_literature(item_id) for item_id in merged_ids]
     others = [item for item in others if item]
     if not others:
         return
 
-    payload = _merged_payload(primary, others)
+    payload = build_merge_preview(primary, others)
     database.save_literature(payload)
 
     for other in others:
         other_id = int(other["id"])
-        database.connection.execute("UPDATE attachments SET literature_id = ? WHERE literature_id = ?", (primary_id, other_id))
-        database.connection.execute("UPDATE notes SET literature_id = ? WHERE literature_id = ?", (primary_id, other_id))
+        database.connection.execute(
+            "UPDATE attachments SET literature_id = ? WHERE literature_id = ?",
+            (primary_id, other_id),
+        )
+        database.connection.execute(
+            "UPDATE notes SET literature_id = ? WHERE literature_id = ?",
+            (primary_id, other_id),
+        )
         database.record_merge_history(
             primary_id,
             other_id,

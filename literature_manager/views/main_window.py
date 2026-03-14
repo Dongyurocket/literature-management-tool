@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QTimer, Qt
@@ -35,8 +36,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
+from ..config import APP_DISPLAY_NAME
 from ..desktop import open_path, reveal_path
 from ..models import LiteratureTableModel
+from ..ocr_service import has_ocr_config
 from ..utils import (
     ENTRY_TYPE_LABELS,
     READING_STATUSES,
@@ -54,12 +58,15 @@ from .dialogs import (
     AttachmentDialog,
     DuplicateDialog,
     ImportCenterDialog,
+    LibraryProfilesDialog,
     MaintenanceDialog,
     MetadataPreviewDialog,
     RenamePreviewDialog,
     SearchDialog,
     SettingsDialog,
     StatisticsDialog,
+    TemplateChoiceDialog,
+    UpdateInfoDialog,
 )
 from .theme import apply_theme
 
@@ -76,12 +83,12 @@ class DropOverlay(QFrame):
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        label = QLabel("Drop PDF, BibTeX, RIS, Markdown, or DOCX files to import")
+        label = QLabel("拖入 PDF、BibTeX、RIS、Markdown 或 DOCX 文件即可导入")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet(
             "font-size: 22px; font-weight: 700; color: #0f6cbd; background: transparent;"
         )
-        hint = QLabel("Folders are also supported. Files will use the current default import mode.")
+        hint = QLabel("也支持拖入文件夹，系统会按当前默认导入方式进行处理。")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setWordWrap(True)
         hint.setStyleSheet("font-size: 13px; color: #21507a; background: transparent;")
@@ -112,7 +119,7 @@ class QtMainWindow(QMainWindow):
         self._metadata_save_timer.setSingleShot(True)
         self._metadata_save_timer.timeout.connect(self._save_metadata_changes)
 
-        self.setWindowTitle("Literature management tool")
+        self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1640, 980)
         self.setAcceptDrops(True)
 
@@ -165,19 +172,29 @@ class QtMainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self.busy_progress.setVisible(busy)
-        self.busy_label.setText(message if busy else "Ready")
+        self.busy_label.setText(message if busy else "就绪")
         if message:
             self.statusBar().showMessage(message, 0 if busy else 3000)
+
+    def _refresh_header_subtitle(self) -> None:
+        profile = self.viewmodel.controller.current_library_profile()
+        library_name = profile.get("name", "默认文献库")
+        archive_state = "（已归档）" if profile.get("archived") else ""
+        self.header_subtitle.setText(
+            f"当前文库：{library_name}{archive_state}。支持拖拽导入、批量导出、OCR 识别、"
+            "多元数据源回退、重复对比与 GitHub 更新。"
+        )
 
     def _reload_primary_controller(self) -> None:
         settings = self.viewmodel.controller.settings_store.load()
         self.viewmodel.controller.settings = settings
         self.viewmodel.controller.reload_database()
         self._apply_theme(settings.ui_theme)
+        self._refresh_header_subtitle()
 
     def _error_summary(self, error_text: str) -> str:
         parts = [line.strip() for line in error_text.splitlines() if line.strip()]
-        return parts[-1] if parts else "Unknown error"
+        return parts[-1] if parts else "未知错误"
 
     def _run_async_task(
         self,
@@ -187,7 +204,7 @@ class QtMainWindow(QMainWindow):
         on_result=None,
         on_finished=None,
         success_toast: tuple[str, str] | None = None,
-        error_title: str = "Operation Failed",
+        error_title: str = "操作失败",
     ) -> None:
         self._set_busy(True, label)
         worker = AsyncWorker(task)
@@ -221,7 +238,7 @@ class QtMainWindow(QMainWindow):
         refresh_after: bool = False,
         preserve_id: int | None = None,
         success_toast: tuple[str, str] | None = None,
-        error_title: str = "Operation Failed",
+        error_title: str = "操作失败",
     ) -> None:
         def task():
             controller = self.viewmodel.controller.clone(auto_rebuild_index=False)
@@ -273,14 +290,14 @@ class QtMainWindow(QMainWindow):
         self._toast_overlay = ToastOverlay(container)
 
         status = QStatusBar(self)
-        self.busy_label = QLabel("Ready", self)
+        self.busy_label = QLabel("就绪", self)
         self.busy_progress = QProgressBar(self)
         self.busy_progress.setMaximumWidth(140)
         self.busy_progress.setMaximum(0)
         self.busy_progress.setVisible(False)
         status.addPermanentWidget(self.busy_label)
         status.addPermanentWidget(self.busy_progress)
-        status.showMessage("Phase 4 workspace ready.")
+        status.showMessage("工作区已就绪。")
         self.setStatusBar(status)
 
     def _build_header(self) -> QWidget:
@@ -292,13 +309,14 @@ class QtMainWindow(QMainWindow):
 
         hero = QVBoxLayout()
         hero.setSpacing(4)
-        title = QLabel("Literature management tool")
+        title = QLabel(f"{APP_DISPLAY_NAME} v{__version__}")
         title.setObjectName("heroTitle")
-        subtitle = QLabel("Phase 3 workspace with lazy table loading, editable metadata, notes, attachments, and drag-and-drop import.")
-        subtitle.setObjectName("heroSubtitle")
-        subtitle.setWordWrap(True)
+        self.header_subtitle = QLabel()
+        self.header_subtitle.setObjectName("heroSubtitle")
+        self.header_subtitle.setWordWrap(True)
+        self._refresh_header_subtitle()
         hero.addWidget(title)
-        hero.addWidget(subtitle)
+        hero.addWidget(self.header_subtitle)
         layout.addLayout(hero, stretch=3)
 
         self.search_bar = SearchBar(self)
@@ -310,35 +328,39 @@ class QtMainWindow(QMainWindow):
         controls.setSpacing(10)
 
         self.theme_combo = QComboBox(self)
-        self.theme_combo.addItem("System", "system")
-        self.theme_combo.addItem("Light", "light")
-        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.addItem("跟随系统", "system")
+        self.theme_combo.addItem("浅色", "light")
+        self.theme_combo.addItem("深色", "dark")
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         controls.addWidget(self.theme_combo)
 
-        add_button = QPushButton("Add Literature", self)
+        add_button = QPushButton("新增文献", self)
         add_button.setObjectName("primaryButton")
         add_button.clicked.connect(self._create_literature)
         controls.addWidget(add_button)
 
-        import_button = QPushButton("Quick Import", self)
+        import_button = QPushButton("快速导入", self)
         import_button.clicked.connect(self._import_files)
         controls.addWidget(import_button)
 
-        export_button = QPushButton("Export Bib", self)
-        export_button.clicked.connect(self._export_selected_bib)
-        controls.addWidget(export_button)
+        template_button = QPushButton("模板导出", self)
+        template_button.clicked.connect(self._export_selected_template)
+        controls.addWidget(template_button)
 
-        search_button = QPushButton("Full-text Search", self)
+        search_button = QPushButton("全文检索", self)
         search_button.clicked.connect(self._open_search_center)
         controls.addWidget(search_button)
 
-        delete_button = QPushButton("Delete", self)
+        update_button = QPushButton("检查更新", self)
+        update_button.clicked.connect(self._check_updates)
+        controls.addWidget(update_button)
+
+        delete_button = QPushButton("删除", self)
         delete_button.setObjectName("ghostButton")
         delete_button.clicked.connect(self._delete_current_literature)
         controls.addWidget(delete_button)
 
-        settings_button = QPushButton("Settings", self)
+        settings_button = QPushButton("设置", self)
         settings_button.setObjectName("ghostButton")
         settings_button.clicked.connect(self._open_settings)
         controls.addWidget(settings_button)
@@ -360,9 +382,9 @@ class QtMainWindow(QMainWindow):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
-        title = QLabel("Navigation")
+        title = QLabel("导航")
         title.setObjectName("sectionTitle")
-        helper = QLabel("System collections plus dynamic subjects, years, and tags from the database.")
+        helper = QLabel("左侧显示系统集合，以及根据当前文库自动生成的主题、年份与标签。")
         helper.setObjectName("mutedLabel")
         helper.setWordWrap(True)
         layout.addWidget(title)
@@ -373,7 +395,7 @@ class QtMainWindow(QMainWindow):
         self.navigation_tree.itemSelectionChanged.connect(self._on_navigation_changed)
         layout.addWidget(self.navigation_tree, stretch=1)
 
-        utility_title = QLabel("Utilities")
+        utility_title = QLabel("工具箱")
         utility_title.setObjectName("sectionTitle")
         layout.addWidget(utility_title)
 
@@ -381,14 +403,18 @@ class QtMainWindow(QMainWindow):
         utility_grid.setHorizontalSpacing(8)
         utility_grid.setVerticalSpacing(8)
         actions = [
-            ("Import Center", self._open_import_center),
-            ("Full-text Search", self._open_search_center),
-            ("Export CSL", self._export_selected_csl),
-            ("Copy GB/T", self._copy_gbt_reference),
-            ("Rename PDFs", self._rename_pdfs),
-            ("Dedupe", self._open_dedupe_center),
-            ("Maintenance", self._open_maintenance_center),
-            ("Statistics", self._show_statistics_dialog),
+            ("导入中心", self._open_import_center),
+            ("全文检索", self._open_search_center),
+            ("导出 Bib", self._export_selected_bib),
+            ("导出 CSL", self._export_selected_csl),
+            ("导出模板", self._export_selected_template),
+            ("复制 GB/T", self._copy_gbt_reference),
+            ("PDF 重命名", self._rename_pdfs),
+            ("OCR 提取", self._run_selected_pdf_ocr),
+            ("重复检测", self._open_dedupe_center),
+            ("统计报表", self._show_statistics_dialog),
+            ("文库管理", self._open_library_profiles),
+            ("维护工具", self._open_maintenance_center),
         ]
         for index, (label, handler) in enumerate(actions):
             button = QPushButton(label, self)
@@ -405,17 +431,17 @@ class QtMainWindow(QMainWindow):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("Literature Data Grid")
+        title = QLabel("文献列表")
         title.setObjectName("sectionTitle")
         header.addWidget(title)
         header.addStretch(1)
 
-        self.filter_pill = QLabel("All literature")
+        self.filter_pill = QLabel("全部文献")
         self.filter_pill.setObjectName("filterPill")
         header.addWidget(self.filter_pill)
         layout.addLayout(header)
 
-        self.result_hint = QLabel("Search titles, authors, subjects, keywords, abstracts, and use Full-text Search for notes or attachment text.")
+        self.result_hint = QLabel("可搜索标题、作者、主题、关键词、摘要；若需检索笔记或附件全文，请使用“全文检索”。")
         self.result_hint.setObjectName("mutedLabel")
         layout.addWidget(self.result_hint)
 
@@ -441,27 +467,27 @@ class QtMainWindow(QMainWindow):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
-        title = QLabel("Inspector")
+        title = QLabel("详细信息")
         title.setObjectName("sectionTitle")
-        helper = QLabel("Edit metadata inline, work with notes, and manage attachments for the selected record.")
+        helper = QLabel("在此编辑元数据、维护笔记与附件，并查看当前选中文献的详细信息。")
         helper.setObjectName("mutedLabel")
         helper.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(helper)
 
-        self.detail_title = QLabel("Select a literature record")
+        self.detail_title = QLabel("请选择一条文献记录")
         self.detail_title.setWordWrap(True)
         self.detail_title.setStyleSheet("font-size: 18px; font-weight: 700; background: transparent;")
         layout.addWidget(self.detail_title)
 
-        self.detail_subtitle = QLabel("No record selected")
+        self.detail_subtitle = QLabel("当前未选中文献")
         self.detail_subtitle.setObjectName("mutedLabel")
         layout.addWidget(self.detail_subtitle)
 
         self.tabs = QTabWidget(card)
-        self.tabs.addTab(self._build_metadata_tab(), "Metadata")
-        self.tabs.addTab(self._build_notes_tab(), "Notes")
-        self.tabs.addTab(self._build_attachments_tab(), "Attachments")
+        self.tabs.addTab(self._build_metadata_tab(), "元数据")
+        self.tabs.addTab(self._build_notes_tab(), "笔记")
+        self.tabs.addTab(self._build_attachments_tab(), "附件")
         layout.addWidget(self.tabs, stretch=1)
         return card
 
@@ -472,11 +498,11 @@ class QtMainWindow(QMainWindow):
         outer_layout.setSpacing(10)
 
         action_row = QHBoxLayout()
-        self.lookup_metadata_button = QPushButton("Lookup DOI/ISBN", self)
+        self.lookup_metadata_button = QPushButton("抓取元数据", self)
         self.lookup_metadata_button.clicked.connect(self._lookup_metadata)
-        self.save_now_button = QPushButton("Save Now", self)
+        self.save_now_button = QPushButton("立即保存", self)
         self.save_now_button.clicked.connect(self._save_metadata_changes)
-        self.metadata_save_label = QLabel("Saved")
+        self.metadata_save_label = QLabel("已保存")
         self.metadata_save_label.setObjectName("mutedLabel")
         action_row.addWidget(self.lookup_metadata_button)
         action_row.addWidget(self.save_now_button)
@@ -501,9 +527,9 @@ class QtMainWindow(QMainWindow):
         extra_form = QFormLayout()
         extra_form.setSpacing(10)
 
-        grid.addWidget(self._section_label("Basic"), 0, 0)
-        grid.addWidget(self._section_label("Publication"), 0, 1)
-        grid.addWidget(self._section_label("Extended"), 2, 0)
+        grid.addWidget(self._section_label("基础信息"), 0, 0)
+        grid.addWidget(self._section_label("出版信息"), 0, 1)
+        grid.addWidget(self._section_label("扩展信息"), 2, 0)
 
         basic_widget = QWidget(container)
         basic_widget.setLayout(basic_form)
@@ -559,37 +585,37 @@ class QtMainWindow(QMainWindow):
         self.remarks_edit = QTextEdit(self)
         self.remarks_edit.setFixedHeight(120)
 
-        basic_form.addRow("Type", self.entry_type_combo)
-        basic_form.addRow("Title", self.title_edit)
-        basic_form.addRow("Translated Title", self.translated_title_edit)
-        basic_form.addRow("Authors", self.authors_edit)
-        basic_form.addRow("Year", self.year_edit)
-        basic_form.addRow("Month", self.month_edit)
-        basic_form.addRow("Subject", self.subject_edit)
-        basic_form.addRow("Keywords", self.keywords_edit)
-        basic_form.addRow("Tags", self.tags_edit)
-        basic_form.addRow("Reading Status", self.reading_status_combo)
-        basic_form.addRow("Rating", self.rating_spin)
+        basic_form.addRow("类型", self.entry_type_combo)
+        basic_form.addRow("标题", self.title_edit)
+        basic_form.addRow("译题", self.translated_title_edit)
+        basic_form.addRow("作者", self.authors_edit)
+        basic_form.addRow("年份", self.year_edit)
+        basic_form.addRow("月份", self.month_edit)
+        basic_form.addRow("主题", self.subject_edit)
+        basic_form.addRow("关键词", self.keywords_edit)
+        basic_form.addRow("标签", self.tags_edit)
+        basic_form.addRow("阅读状态", self.reading_status_combo)
+        basic_form.addRow("评分", self.rating_spin)
 
-        publication_form.addRow("Publication", self.publication_title_edit)
-        publication_form.addRow("Publisher", self.publisher_edit)
-        publication_form.addRow("School", self.school_edit)
-        publication_form.addRow("Conference", self.conference_name_edit)
-        publication_form.addRow("Standard No.", self.standard_number_edit)
-        publication_form.addRow("Patent No.", self.patent_number_edit)
-        publication_form.addRow("Volume", self.volume_edit)
-        publication_form.addRow("Issue", self.issue_edit)
-        publication_form.addRow("Pages", self.pages_edit)
+        publication_form.addRow("刊名 / 书名", self.publication_title_edit)
+        publication_form.addRow("出版社", self.publisher_edit)
+        publication_form.addRow("学校", self.school_edit)
+        publication_form.addRow("会议", self.conference_name_edit)
+        publication_form.addRow("标准号", self.standard_number_edit)
+        publication_form.addRow("专利号", self.patent_number_edit)
+        publication_form.addRow("卷", self.volume_edit)
+        publication_form.addRow("期", self.issue_edit)
+        publication_form.addRow("页码", self.pages_edit)
         publication_form.addRow("DOI", self.doi_edit)
         publication_form.addRow("ISBN", self.isbn_edit)
         publication_form.addRow("URL", self.url_edit)
-        publication_form.addRow("Language", self.language_edit)
-        publication_form.addRow("Country", self.country_edit)
+        publication_form.addRow("语言", self.language_edit)
+        publication_form.addRow("国家 / 地区", self.country_edit)
 
-        extra_form.addRow("Citation Key", self.cite_key_edit)
-        extra_form.addRow("Summary", self.summary_edit)
-        extra_form.addRow("Abstract", self.abstract_edit)
-        extra_form.addRow("Remarks", self.remarks_edit)
+        extra_form.addRow("引用键", self.cite_key_edit)
+        extra_form.addRow("简介", self.summary_edit)
+        extra_form.addRow("摘要", self.abstract_edit)
+        extra_form.addRow("备注", self.remarks_edit)
 
         self._connect_metadata_autosave()
         scroll.setWidget(container)
@@ -603,15 +629,15 @@ class QtMainWindow(QMainWindow):
         layout.setSpacing(10)
 
         button_row = QHBoxLayout()
-        new_note_button = QPushButton("New Text Note", self)
+        new_note_button = QPushButton("新建文本笔记", self)
         new_note_button.clicked.connect(self._create_text_note)
-        link_note_button = QPushButton("Link Note File", self)
+        link_note_button = QPushButton("关联笔记文件", self)
         link_note_button.clicked.connect(self._link_note_file)
-        self.save_note_button = QPushButton("Save Note", self)
+        self.save_note_button = QPushButton("保存笔记", self)
         self.save_note_button.clicked.connect(self._save_note)
-        self.delete_note_button = QPushButton("Delete Note", self)
+        self.delete_note_button = QPushButton("删除笔记", self)
         self.delete_note_button.clicked.connect(self._delete_selected_note)
-        self.open_note_file_button = QPushButton("Open File", self)
+        self.open_note_file_button = QPushButton("打开文件", self)
         self.open_note_file_button.clicked.connect(self._open_selected_note_file)
 
         for button in (
@@ -637,21 +663,21 @@ class QtMainWindow(QMainWindow):
 
         top_row = QHBoxLayout()
         self.note_title_edit = QLineEdit(self)
-        self.note_title_edit.setPlaceholderText("Note title")
+        self.note_title_edit.setPlaceholderText("笔记标题")
         self.note_format_combo = QComboBox(self)
         self.note_format_combo.addItem("Markdown", "markdown")
-        self.note_format_combo.addItem("Text", "text")
+        self.note_format_combo.addItem("纯文本", "text")
         top_row.addWidget(self.note_title_edit, stretch=1)
         top_row.addWidget(self.note_format_combo)
         editor_layout.addLayout(top_row)
 
-        self.note_info_label = QLabel("Create a text note or select an existing note.")
+        self.note_info_label = QLabel("可以创建文本笔记，也可以选中已有笔记继续编辑。")
         self.note_info_label.setObjectName("mutedLabel")
         self.note_info_label.setWordWrap(True)
         editor_layout.addWidget(self.note_info_label)
 
         self.note_body_edit = QTextEdit(self)
-        self.note_body_edit.setPlaceholderText("Markdown and plain text note content")
+        self.note_body_edit.setPlaceholderText("输入 Markdown 或纯文本笔记内容")
         editor_layout.addWidget(self.note_body_edit, stretch=1)
 
         splitter.addWidget(editor)
@@ -666,13 +692,13 @@ class QtMainWindow(QMainWindow):
         layout.setSpacing(10)
 
         button_row = QHBoxLayout()
-        add_button = QPushButton("Add Files", self)
+        add_button = QPushButton("添加附件", self)
         add_button.clicked.connect(self._add_attachments)
-        self.open_attachment_button = QPushButton("Open", self)
+        self.open_attachment_button = QPushButton("打开", self)
         self.open_attachment_button.clicked.connect(self._open_selected_attachment)
-        self.reveal_attachment_button = QPushButton("Reveal", self)
+        self.reveal_attachment_button = QPushButton("定位文件", self)
         self.reveal_attachment_button.clicked.connect(self._reveal_selected_attachment)
-        self.delete_attachment_button = QPushButton("Delete", self)
+        self.delete_attachment_button = QPushButton("删除", self)
         self.delete_attachment_button.clicked.connect(self._delete_selected_attachment)
         for button in (
             add_button,
@@ -688,7 +714,7 @@ class QtMainWindow(QMainWindow):
         self.attachments_list.currentItemChanged.connect(self._on_attachment_selected)
         layout.addWidget(self.attachments_list, stretch=1)
 
-        self.attachments_info_label = QLabel("Select an attachment to open it with the configured PDF reader or the system default app.")
+        self.attachments_info_label = QLabel("打开 PDF 时会优先使用设置中的阅读器，其他文件则使用系统默认程序。")
         self.attachments_info_label.setObjectName("mutedLabel")
         self.attachments_info_label.setWordWrap(True)
         layout.addWidget(self.attachments_info_label)
@@ -762,7 +788,7 @@ class QtMainWindow(QMainWindow):
         )
         self._table_model.set_rows(rows)
         self.result_hint.setText(
-            f"{self._table_model.total_count()} item(s) matched. The grid loads rows in batches as you scroll."
+            f"共匹配到 {self._table_model.total_count()} 条记录；列表会在滚动时分批加载。"
         )
         self.filter_pill.setText(self.viewmodel.filter_summary(self._active_filters))
 
@@ -793,6 +819,7 @@ class QtMainWindow(QMainWindow):
         self._refresh_stats()
         self._load_navigation(navigation_key)
         self._refresh_table(preserve_id=preserve_id)
+        self._refresh_header_subtitle()
 
     def _connect_metadata_autosave(self) -> None:
         widgets = [
@@ -834,7 +861,7 @@ class QtMainWindow(QMainWindow):
     def _schedule_metadata_save(self) -> None:
         if self._loading_metadata or self._current_literature_id is None:
             return
-        self.metadata_save_label.setText("Saving soon...")
+        self.metadata_save_label.setText("即将保存…")
         self._metadata_save_timer.start()
 
     def _save_metadata_changes(self) -> None:
@@ -848,7 +875,7 @@ class QtMainWindow(QMainWindow):
             {
                 "id": self._current_literature_id,
                 "entry_type": str(self.entry_type_combo.currentData()),
-                "title": self.title_edit.text().strip() or "Untitled Record",
+                "title": self.title_edit.text().strip() or "未命名文献",
                 "translated_title": self.translated_title_edit.text().strip(),
                 "authors": split_csv(self.authors_edit.text().replace("\n", ",")),
                 "year": int(self.year_edit.text()) if self.year_edit.text().strip().isdigit() else None,
@@ -882,14 +909,14 @@ class QtMainWindow(QMainWindow):
         refreshed = self.viewmodel.detail_payload(self._current_literature_id)
         self._update_detail_header(refreshed)
         self.cite_key_edit.setText(refreshed.get("cite_key", "") or "")
-        self.metadata_save_label.setText("Saved")
-        self.statusBar().showMessage("Metadata saved.", 2500)
+        self.metadata_save_label.setText("已保存")
+        self.statusBar().showMessage("元数据已保存。", 2500)
 
     def _create_literature(self) -> None:
         literature_id = self.viewmodel.controller.save_literature(
             {
                 "entry_type": "journal_article",
-                "title": "Untitled Record",
+                "title": "未命名文献",
                 "authors": [],
                 "tags": [],
                 "reading_status": READING_STATUSES[0],
@@ -897,7 +924,7 @@ class QtMainWindow(QMainWindow):
         )
         self.search_bar.line_edit.clear()
         self._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
-        self._show_toast("Created", "A new literature record is ready for editing.", level="success")
+        self._show_toast("已创建", "已新建一条文献记录，可立即编辑。", level="success")
 
     def _delete_current_literature(self) -> None:
         if self._current_literature_id is None:
@@ -905,16 +932,16 @@ class QtMainWindow(QMainWindow):
         detail = self.viewmodel.detail_payload(self._current_literature_id)
         answer = QMessageBox.question(
             self,
-            "Delete literature",
-            f"Delete '{detail.get('title', 'Untitled')}' and all linked notes/attachments records?\n"
-            "Underlying files are not removed automatically.",
+            "删除文献",
+            f"确认删除“{detail.get('title', '未命名文献')}”及其关联的笔记 / 附件记录吗？\n"
+            "原始文件不会被自动删除。",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
         deleted_id = self._current_literature_id
         self.viewmodel.controller.delete_literature(deleted_id)
         self._refresh_after_library_change(navigation_key=self._current_navigation_key())
-        self._show_toast("Deleted", f"Literature #{deleted_id} was removed.", level="success")
+        self._show_toast("已删除", f"文献 #{deleted_id} 已删除。", level="success")
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self.viewmodel.controller.settings, self)
@@ -923,13 +950,30 @@ class QtMainWindow(QMainWindow):
         settings = dialog.value()
         self.viewmodel.controller.save_settings(settings)
         self._apply_theme(settings.ui_theme)
-        self._show_toast("Settings Saved", "Desktop preferences were updated.", level="success")
+        if dialog.request_install_umi:
+            def handle_result(result) -> None:
+                self._reload_primary_controller()
+                self._show_toast(
+                    "Umi-OCR 已安装",
+                    f"已安装到 `{result['install_dir']}`，后续可直接用于扫描版 PDF 识别。",
+                    level="success",
+                    duration_ms=5200,
+                )
+
+            self._run_controller_task(
+                label="正在下载安装 Umi-OCR…",
+                controller_task=lambda controller: controller.install_umi_ocr(),
+                on_result=handle_result,
+                error_title="安装 Umi-OCR 失败",
+            )
+            return
+        self._show_toast("设置已保存", "已更新桌面偏好设置。", level="success")
 
     def _import_files(self) -> None:
         selected, _ = QFileDialog.getOpenFileNames(
             self,
-            "Import literature files",
-            filter="Supported files (*.pdf *.bib *.ris *.docx *.md *.markdown *.txt);;All files (*.*)",
+            "导入文献文件",
+            filter="支持的文件 (*.pdf *.bib *.ris *.docx *.md *.markdown *.txt);;所有文件 (*.*)",
         )
         if selected:
             self._import_paths(selected)
@@ -942,43 +986,193 @@ class QtMainWindow(QMainWindow):
             items, summary = result
             if not items:
                 self._show_toast(
-                    "Nothing Imported",
-                    "No supported files were found in the selected or dropped paths.",
+                    "未导入任何内容",
+                    "在所选或拖拽路径中未发现受支持的文件。",
                     level="warning",
                 )
                 return
             self._show_toast(
-                "Import Completed",
-                f"Imported {summary['imported']} item(s), skipped {summary['skipped']}.",
+                "导入完成",
+                f"成功导入 {summary['imported']} 项，跳过 {summary['skipped']} 项。",
                 level="success",
             )
 
         self._run_controller_task(
-            label="Importing files in the background...",
+            label="正在后台导入文件…",
             controller_task=task,
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
             preserve_id=self._current_literature_id,
-            error_title="Import Failed",
+            error_title="导入失败",
         )
 
     def _export_selected_bib(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            QMessageBox.information(self, "Export Bib", "Select at least one literature record to export.")
+            QMessageBox.information(self, "导出 Bib", "请至少选择一条文献记录。")
             return
         initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export BibTeX",
-            str(Path(initial_dir) / "literature_export.bib"),
+            "导出 BibTeX",
+            str(Path(initial_dir) / "文献导出.bib"),
             filter="BibTeX (*.bib)",
         )
         if not path:
             return
         count = self.viewmodel.controller.export_bib(literature_ids, path)
-        self._show_toast("BibTeX Exported", f"Exported {count} record(s) to `{path}`.", level="success")
+        self._show_toast("导出完成", f"已导出 {count} 条记录到 `{path}`。", level="success")
+
+    def _export_selected_template(self) -> None:
+        literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
+        if not literature_ids:
+            self._show_toast("模板导出", "请至少选择一条文献记录。", level="warning")
+            return
+        dialog = TemplateChoiceDialog(
+            "选择导出模板",
+            self.viewmodel.controller.list_export_templates(),
+            current_key=self.viewmodel.controller.settings.preferred_export_template,
+            parent=self,
+        )
+        if dialog.exec() == 0 or not dialog.selected_key:
+            return
+        template_key = dialog.selected_key
+        suffix = self.viewmodel.controller.suggested_export_extension(template_key)
+        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        default_name = f"文献模板导出{suffix}"
+        filters = {
+            ".md": "Markdown (*.md)",
+            ".csv": "CSV (*.csv)",
+            ".html": "HTML (*.html)",
+            ".txt": "Text (*.txt)",
+        }
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存模板导出",
+            str(Path(initial_dir) / default_name),
+            filter=filters.get(suffix, "所有文件 (*.*)"),
+        )
+        if not path:
+            return
+        export_path = self.viewmodel.controller.export_template(literature_ids, template_key, path)
+        self._show_toast("模板导出完成", f"文件已保存到 `{export_path}`。", level="success")
+
+    def _check_updates(self) -> None:
+        def handle_result(release_info) -> None:
+            dialog = UpdateInfoDialog(release_info, self)
+            if dialog.exec() == 0 or not dialog.action_payload:
+                return
+            action = dialog.action_payload.get("action")
+            if action == "open_release" and release_info.get("html_url"):
+                webbrowser.open(str(release_info["html_url"]))
+                return
+            if action != "download":
+                return
+            target_dir = QFileDialog.getExistingDirectory(self, "选择更新包保存目录")
+            if not target_dir:
+                return
+
+            def download_task(controller):
+                return controller.download_update(release_info, target_dir)
+
+            def handle_downloaded(file_path: str) -> None:
+                self._show_toast("更新包已下载", f"安装包已保存到 `{file_path}`。", level="success")
+
+            self._run_controller_task(
+                label="正在下载更新包…",
+                controller_task=download_task,
+                on_result=handle_downloaded,
+                error_title="下载更新失败",
+            )
+
+        self._run_controller_task(
+            label="正在检查 GitHub 更新…",
+            controller_task=lambda controller: controller.check_for_updates(),
+            on_result=handle_result,
+            error_title="检查更新失败",
+        )
+
+    def _open_library_profiles(self) -> None:
+        dialog = LibraryProfilesDialog(self.viewmodel.controller.list_library_profiles(), self)
+        if dialog.exec() == 0 or not dialog.action_payload:
+            return
+        payload = dialog.action_payload
+        action = payload.get("action")
+        if action == "create":
+            try:
+                created = self.viewmodel.controller.create_library_profile(str(payload["name"]))
+            except ValueError as exc:
+                QMessageBox.warning(self, "新建文库", str(exc))
+                return
+            self._show_toast("文库已创建", f"已创建文库“{created['name']}”。", level="success")
+            self._open_library_profiles()
+            return
+        if action == "switch":
+            try:
+                summary = self.viewmodel.controller.switch_library_profile(str(payload["name"]))
+            except ValueError as exc:
+                QMessageBox.warning(self, "切换文库", str(exc))
+                return
+            self._refresh_after_library_change(navigation_key="all")
+            self._show_toast("文库已切换", f"当前文库：{summary['name']}。", level="success")
+            return
+        if action == "archive":
+            try:
+                summary = self.viewmodel.controller.set_library_archived(
+                    str(payload["name"]),
+                    bool(payload["archived"]),
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "归档文库", str(exc))
+                return
+            self._refresh_after_library_change(navigation_key="all")
+            state = "已归档" if summary["archived"] else "已恢复"
+            self._show_toast("文库状态已更新", f"文库“{summary['name']}”{state}。", level="success")
+            self._open_library_profiles()
+
+    def _run_selected_pdf_ocr(self) -> None:
+        if not has_ocr_config(self.viewmodel.controller.settings):
+            self._show_toast(
+                "OCR 提取",
+                "请先在“设置”中选择或下载安装 Umi-OCR，然后再执行扫描版 PDF 识别。",
+                level="warning",
+                duration_ms=4200,
+            )
+            return
+        literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
+        if not literature_ids:
+            self._show_toast("OCR 提取", "请至少选择一条文献记录。", level="warning")
+            return
+        attachment_ids: list[int] = []
+        for literature_id in literature_ids:
+            detail = self.viewmodel.controller.get_literature(literature_id)
+            if not detail:
+                continue
+            for attachment in detail.get("attachments", []):
+                path = str(attachment.get("resolved_path", ""))
+                if path.lower().endswith(".pdf"):
+                    attachment_ids.append(int(attachment["id"]))
+        if not attachment_ids:
+            self._show_toast("OCR 提取", "当前选择中没有 PDF 附件。", level="warning")
+            return
+
+        def handle_result(result) -> None:
+            self._show_toast(
+                "OCR 提取完成",
+                f"已更新 {result['updated']} 个 PDF，跳过 {result['skipped']} 个附件。",
+                level="success",
+            )
+
+        self._run_controller_task(
+            label="正在执行 PDF OCR 提取…",
+            controller_task=lambda controller: controller.reextract_attachment_texts(attachment_ids),
+            on_result=handle_result,
+            reload_after=True,
+            refresh_after=True,
+            preserve_id=self._current_literature_id,
+            error_title="OCR 提取失败",
+        )
 
     def _lookup_metadata(self) -> None:
         if self._current_literature_id is None:
@@ -988,10 +1182,11 @@ class QtMainWindow(QMainWindow):
             return
         manual_identifier = ""
         if not detail.get("doi") and not detail.get("isbn"):
-            value, ok = QInputDialog.getText(self, "Lookup DOI/ISBN", "Enter DOI or ISBN")
+            value, ok = QInputDialog.getText(self, "抓取元数据", "请输入 DOI 或 ISBN（留空则按标题回退检索）")
             if not ok or not value.strip():
-                return
-            manual_identifier = value.strip()
+                manual_identifier = ""
+            else:
+                manual_identifier = value.strip()
 
         def task(controller):
             return controller.lookup_metadata_for_literature(
@@ -1002,7 +1197,7 @@ class QtMainWindow(QMainWindow):
         def handle_result(result) -> None:
             current_detail, payload = result
             if not current_detail or not payload:
-                self._show_toast("Lookup DOI/ISBN", "No metadata was returned.", level="warning")
+                self._show_toast("抓取元数据", "未返回可用元数据。", level="warning")
                 return
             preview = MetadataPreviewDialog(payload, self)
             if preview.exec() == 0:
@@ -1015,16 +1210,16 @@ class QtMainWindow(QMainWindow):
                 navigation_key=self._current_navigation_key(),
             )
             self._show_toast(
-                "Metadata Updated",
-                "Missing fields were merged from DOI/ISBN lookup.",
+                "元数据已更新",
+                "已将缺失字段合并到当前文献。",
                 level="success",
             )
 
         self._run_controller_task(
-            label="Fetching metadata from DOI/ISBN...",
+            label="正在抓取元数据…",
             controller_task=task,
             on_result=handle_result,
-            error_title="Metadata Lookup Failed",
+            error_title="元数据抓取失败",
         )
 
     def _open_import_center(self) -> None:
@@ -1040,19 +1235,19 @@ class QtMainWindow(QMainWindow):
 
         def handle_result(summary) -> None:
             self._show_toast(
-                "Import Completed",
-                f"Imported {summary['imported']} item(s), skipped {summary['skipped']}.",
+                "导入完成",
+                f"成功导入 {summary['imported']} 项，跳过 {summary['skipped']} 项。",
                 level="success",
             )
 
         self._run_controller_task(
-            label="Importing selected items...",
+            label="正在导入选中项…",
             controller_task=task,
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
             preserve_id=self._current_literature_id,
-            error_title="Import Failed",
+            error_title="导入失败",
         )
 
     def _open_search_center(self) -> None:
@@ -1064,42 +1259,42 @@ class QtMainWindow(QMainWindow):
             preserve_id=dialog.selected_literature_id,
             navigation_key="all",
         )
-        self._show_toast("Search Located", "Focused the selected literature record.", level="info")
+        self._show_toast("已定位", "已定位到所选文献。", level="info")
 
     def _export_selected_csl(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("Export CSL", "Select at least one literature record.", level="warning")
+            self._show_toast("导出 CSL", "请至少选择一条文献记录。", level="warning")
             return
         initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export CSL JSON",
-            str(Path(initial_dir) / "literature_export_csl.json"),
+            "导出 CSL JSON",
+            str(Path(initial_dir) / "文献导出_csl.json"),
             filter="JSON (*.json)",
         )
         if not path:
             return
         count = self.viewmodel.controller.export_csl_json(literature_ids, path)
-        self._show_toast("CSL Exported", f"Exported {count} record(s) to `{path}`.", level="success")
+        self._show_toast("导出完成", f"已导出 {count} 条记录到 `{path}`。", level="success")
 
     def _copy_gbt_reference(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("Copy GB/T", "Select at least one literature record.", level="warning")
+            self._show_toast("复制 GB/T", "请至少选择一条文献记录。", level="warning")
             return
         references = self.viewmodel.controller.build_gbt_references(literature_ids)
         text = "\n".join(reference for reference in references if reference)
         if not text.strip():
-            self._show_toast("Copy GB/T", "No references were generated.", level="warning")
+            self._show_toast("复制 GB/T", "未生成可用的参考文献。", level="warning")
             return
         QApplication.clipboard().setText(text)
-        self._show_toast("Copied", f"Copied {len(references)} GB/T reference(s) to the clipboard.", level="success")
+        self._show_toast("已复制", f"已复制 {len(references)} 条 GB/T 参考文献。", level="success")
 
     def _rename_pdfs(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("Rename PDFs", "Select at least one literature record.", level="warning")
+            self._show_toast("PDF 重命名", "请至少选择一条文献记录。", level="warning")
             return
 
         def preview_task(controller):
@@ -1107,7 +1302,7 @@ class QtMainWindow(QMainWindow):
 
         def handle_preview(previews) -> None:
             if not previews:
-                self._show_toast("Rename PDFs", "No PDF attachments are available for renaming.", level="warning")
+                self._show_toast("PDF 重命名", "当前选择中没有可重命名的 PDF 附件。", level="warning")
                 return
             dialog = RenamePreviewDialog(previews, self)
             if dialog.exec() == 0:
@@ -1117,23 +1312,23 @@ class QtMainWindow(QMainWindow):
                 return controller.apply_pdf_renames(previews)
 
             def handle_renamed(renamed: int) -> None:
-                self._show_toast("Rename Completed", f"Renamed {renamed} PDF file(s).", level="success")
+                self._show_toast("重命名完成", f"已重命名 {renamed} 个 PDF 文件。", level="success")
 
             self._run_controller_task(
-                label="Renaming PDF files...",
+                label="正在重命名 PDF 文件…",
                 controller_task=rename_task,
                 on_result=handle_renamed,
                 reload_after=True,
                 refresh_after=True,
                 preserve_id=self._current_literature_id,
-                error_title="Rename Failed",
+                error_title="PDF 重命名失败",
             )
 
         self._run_controller_task(
-            label="Preparing PDF rename preview...",
+            label="正在生成 PDF 重命名预览…",
             controller_task=preview_task,
             on_result=handle_preview,
-            error_title="Rename Preview Failed",
+            error_title="重命名预览失败",
         )
 
     def _open_dedupe_center(self) -> None:
@@ -1142,7 +1337,7 @@ class QtMainWindow(QMainWindow):
 
         def handle_groups(groups) -> None:
             if not groups:
-                self._show_toast("Dedupe", "No duplicate literature groups were found.", level="info")
+                self._show_toast("重复检测", "未发现重复文献组。", level="info")
                 return
             dialog = DuplicateDialog(groups, self)
             if dialog.exec() == 0 or not dialog.result_payload:
@@ -1155,31 +1350,45 @@ class QtMainWindow(QMainWindow):
 
             def handle_merge(result_payload) -> None:
                 self._show_toast(
-                    "Merge Completed",
-                    f"Merged {len(result_payload['merged_ids'])} duplicate record(s).",
+                    "合并完成",
+                    f"已合并 {len(result_payload['merged_ids'])} 条重复记录。",
                     level="success",
                 )
 
             self._run_controller_task(
-                label="Merging duplicate literature records...",
+                label="正在合并重复文献…",
                 controller_task=merge_task,
                 on_result=handle_merge,
                 reload_after=True,
                 refresh_after=True,
                 preserve_id=payload["primary_id"],
-                error_title="Duplicate Merge Failed",
+                error_title="重复文献合并失败",
             )
 
         self._run_controller_task(
-            label="Scanning for duplicate literature records...",
+            label="正在扫描重复文献…",
             controller_task=scan_task,
             on_result=handle_groups,
-            error_title="Duplicate Scan Failed",
+            error_title="重复文献扫描失败",
         )
 
     def _show_statistics_dialog(self) -> None:
         dialog = StatisticsDialog(self.viewmodel.controller.get_statistics(), self)
-        dialog.exec()
+        if dialog.exec() == 0 or not dialog.export_template_key:
+            return
+        template_key = dialog.export_template_key
+        suffix = self.viewmodel.controller.suggested_export_extension(template_key)
+        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出统计报表",
+            str(Path(initial_dir) / f"文库统计{suffix}"),
+            filter="Markdown (*.md);;JSON (*.json);;所有文件 (*.*)",
+        )
+        if not path:
+            return
+        export_path = self.viewmodel.controller.export_statistics(template_key, path)
+        self._show_toast("统计报表已导出", f"文件已保存到 `{export_path}`。", level="success")
 
     def _open_maintenance_center(self) -> None:
         if self._maintenance_dialog is None:
@@ -1208,14 +1417,14 @@ class QtMainWindow(QMainWindow):
                 self._maintenance_dialog.set_rows(rows)
 
         self._run_controller_task(
-            label="Scanning for missing files...",
+            label="正在扫描缺失文件…",
             controller_task=task,
             on_result=handle_result,
-            error_title="Missing Path Scan Failed",
+            error_title="缺失路径扫描失败",
         )
 
     def _repair_missing_paths(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select repair search folder")
+        folder = QFileDialog.getExistingDirectory(self, "选择修复搜索目录")
         if not folder:
             return
 
@@ -1224,20 +1433,20 @@ class QtMainWindow(QMainWindow):
 
         def handle_result(result) -> None:
             self._show_toast(
-                "Repair Completed",
-                f"Fixed {result['fixed']} item(s), {result['unresolved']} still unresolved.",
+                "修复完成",
+                f"已修复 {result['fixed']} 项，仍有 {result['unresolved']} 项未解决。",
                 level="success",
             )
             self._load_missing_paths()
 
         self._run_controller_task(
-            label="Repairing missing paths...",
+            label="正在修复缺失路径…",
             controller_task=task,
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
             preserve_id=self._current_literature_id,
-            error_title="Repair Failed",
+            error_title="路径修复失败",
         )
 
     def _rebuild_search_index(self) -> None:
@@ -1246,19 +1455,19 @@ class QtMainWindow(QMainWindow):
             return True
 
         self._run_controller_task(
-            label="Rebuilding full-text search index...",
+            label="正在重建全文索引…",
             controller_task=task,
             reload_after=True,
             refresh_after=False,
-            success_toast=("Index Rebuilt", "The full-text search index was rebuilt."),
-            error_title="Rebuild Index Failed",
+            success_toast=("索引已重建", "全文检索索引已重建。"),
+            error_title="重建索引失败",
         )
 
     def _create_backup(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Create Backup",
-            str(Path.cwd() / "literature_manager_backup.zip"),
+            "创建备份",
+            str(Path.cwd() / "文献管理工具备份.zip"),
             filter="ZIP (*.zip)",
         )
         if not path:
@@ -1268,23 +1477,23 @@ class QtMainWindow(QMainWindow):
             return controller.create_backup(path)
 
         def handle_result(backup_path: str) -> None:
-            self._show_toast("Backup Created", f"Backup saved to `{backup_path}`.", level="success")
+            self._show_toast("备份已创建", f"备份已保存到 `{backup_path}`。", level="success")
 
         self._run_controller_task(
-            label="Creating backup archive...",
+            label="正在创建备份…",
             controller_task=task,
             on_result=handle_result,
-            error_title="Backup Failed",
+            error_title="创建备份失败",
         )
 
     def _restore_backup(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select backup archive", filter="ZIP (*.zip)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择备份文件", filter="ZIP (*.zip)")
         if not path:
             return
         answer = QMessageBox.question(
             self,
-            "Restore Backup",
-            "Restoring a backup overwrites the current metadata. Continue?",
+            "恢复备份",
+            "恢复备份会覆盖当前元数据，是否继续？",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -1293,17 +1502,17 @@ class QtMainWindow(QMainWindow):
             return controller.restore_backup(path)
 
         def handle_result(_settings) -> None:
-            self._show_toast("Backup Restored", "The backup was restored and the workspace reloaded.", level="success")
+            self._show_toast("备份已恢复", "备份恢复完成，工作区已重新加载。", level="success")
             self._load_missing_paths()
 
         self._run_controller_task(
-            label="Restoring backup archive...",
+            label="正在恢复备份…",
             controller_task=task,
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
             preserve_id=None,
-            error_title="Restore Failed",
+            error_title="恢复备份失败",
         )
     def _create_text_note(self) -> None:
         if self._current_literature_id is None:
@@ -1319,7 +1528,7 @@ class QtMainWindow(QMainWindow):
         self.note_format_combo.setCurrentIndex(0)
         self.note_body_edit.setReadOnly(False)
         self.note_body_edit.setPlainText("")
-        self.note_info_label.setText("Editing a new text note. Choose Markdown or plain text and save when ready.")
+        self.note_info_label.setText("正在编辑新的文本笔记，可选择 Markdown 或纯文本格式。")
         self.save_note_button.setEnabled(True)
         self.open_note_file_button.setEnabled(False)
         self._loading_notes = False
@@ -1329,8 +1538,8 @@ class QtMainWindow(QMainWindow):
             return
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Link note file",
-            filter="Note files (*.docx *.md *.markdown *.txt);;All files (*.*)",
+            "关联笔记文件",
+            filter="笔记文件 (*.docx *.md *.markdown *.txt);;所有文件 (*.*)",
         )
         if not selected:
             return
@@ -1346,17 +1555,17 @@ class QtMainWindow(QMainWindow):
                 import_mode=self.viewmodel.controller.settings.default_import_mode,
             )
         except ValueError as exc:
-            QMessageBox.warning(self, "Link note file", str(exc))
+            QMessageBox.warning(self, "关联笔记文件", str(exc))
             return
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
         self._show_detail(self._current_literature_id, select_note_id=note_id)
-        self._show_toast("Note File Linked", "The external note file is now attached to this literature record.", level="success")
+        self._show_toast("笔记已关联", "外部笔记文件已关联到当前文献。", level="success")
 
     def _save_note(self) -> None:
         if self._current_literature_id is None or self._current_note_is_file:
             return
-        title = self.note_title_edit.text().strip() or "Untitled Note"
+        title = self.note_title_edit.text().strip() or "未命名笔记"
         content = self.note_body_edit.toPlainText()
         note_id = self.viewmodel.controller.save_note(
             literature_id=self._current_literature_id,
@@ -1370,7 +1579,7 @@ class QtMainWindow(QMainWindow):
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
         self._show_detail(self._current_literature_id, select_note_id=note_id)
-        self._show_toast("Note Saved", "The note content was updated.", level="success")
+        self._show_toast("笔记已保存", "笔记内容已更新。", level="success")
 
     def _delete_selected_note(self) -> None:
         if self._current_note_id is None:
@@ -1379,8 +1588,8 @@ class QtMainWindow(QMainWindow):
         if self._current_note_is_file:
             answer = QMessageBox.question(
                 self,
-                "Delete note file",
-                "Delete the linked note record as well as the underlying file?",
+                "删除笔记文件",
+                "是否同时删除笔记记录和对应文件？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.No,
             )
@@ -1388,14 +1597,14 @@ class QtMainWindow(QMainWindow):
                 return
             delete_file = answer == QMessageBox.StandardButton.Yes
         else:
-            answer = QMessageBox.question(self, "Delete note", "Delete the selected note?")
+            answer = QMessageBox.question(self, "删除笔记", "确认删除当前笔记吗？")
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.viewmodel.controller.delete_note(self._current_note_id, delete_file=delete_file)
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
         self._show_detail(self._current_literature_id)
-        self._show_toast("Note Deleted", "The selected note was removed.", level="success")
+        self._show_toast("笔记已删除", "已删除所选笔记。", level="success")
 
     def _open_selected_note_file(self) -> None:
         note = self._selected_note_payload()
@@ -1404,15 +1613,15 @@ class QtMainWindow(QMainWindow):
         try:
             open_path(str(note["resolved_path"]))
         except FileNotFoundError:
-            QMessageBox.warning(self, "Open note file", f"File not found:\n{note['resolved_path']}")
+            QMessageBox.warning(self, "打开笔记文件", f"文件不存在：\n{note['resolved_path']}")
 
     def _add_attachments(self) -> None:
         if self._current_literature_id is None:
             return
         files, _ = QFileDialog.getOpenFileNames(
             self,
-            "Add attachments",
-            filter="All files (*.*)",
+            "添加附件",
+            filter="所有文件 (*.*)",
         )
         if not files:
             return
@@ -1426,7 +1635,7 @@ class QtMainWindow(QMainWindow):
                 **dialog.value(),
             )
         except ValueError as exc:
-            QMessageBox.warning(self, "Add attachments", str(exc))
+            QMessageBox.warning(self, "添加附件", str(exc))
             return
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
@@ -1434,7 +1643,7 @@ class QtMainWindow(QMainWindow):
             self._current_literature_id,
             select_attachment_id=created_ids[0] if created_ids else None,
         )
-        self._show_toast("Attachments Added", f"Added {len(created_ids)} attachment(s).", level="success")
+        self._show_toast("附件已添加", f"已添加 {len(created_ids)} 个附件。", level="success")
 
     def _open_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
@@ -1447,10 +1656,10 @@ class QtMainWindow(QMainWindow):
             open_path(str(attachment["resolved_path"]), preferred_app=preferred_app)
         except FileNotFoundError:
             if preferred_app:
-                message = f"File or PDF reader was not found:\n{attachment['resolved_path']}\n{preferred_app}"
+                message = f"文件或 PDF 阅读器不存在：\n{attachment['resolved_path']}\n{preferred_app}"
             else:
-                message = f"File not found:\n{attachment['resolved_path']}"
-            QMessageBox.warning(self, "Open attachment", message)
+                message = f"文件不存在：\n{attachment['resolved_path']}"
+            QMessageBox.warning(self, "打开附件", message)
 
     def _reveal_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
@@ -1459,16 +1668,16 @@ class QtMainWindow(QMainWindow):
         try:
             reveal_path(str(attachment["resolved_path"]))
         except FileNotFoundError:
-            QMessageBox.warning(self, "Reveal attachment", f"File not found:\n{attachment['resolved_path']}")
+            QMessageBox.warning(self, "定位附件", f"文件不存在：\n{attachment['resolved_path']}")
 
     def _delete_selected_attachment(self) -> None:
         if self._current_attachment_id is None:
             return
         answer = QMessageBox.question(
             self,
-            "Delete attachment",
-            "Delete the selected attachment and the underlying file?\n"
-            "Choose No to remove only the attachment record.",
+            "删除附件",
+            "是否同时删除附件记录和实际文件？\n"
+            "选择“否”则只删除记录。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.No,
         )
@@ -1481,7 +1690,7 @@ class QtMainWindow(QMainWindow):
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
         self._show_detail(self._current_literature_id)
-        self._show_toast("Attachment Deleted", "The selected attachment was removed.", level="success")
+        self._show_toast("附件已删除", "已删除所选附件。", level="success")
 
     def _on_search_requested(self, text: str) -> None:
         self._refresh_table(search_text=text, preserve_id=self._current_literature_id)
@@ -1495,14 +1704,14 @@ class QtMainWindow(QMainWindow):
             return
         if not navigation.enabled:
             self.statusBar().showMessage(
-                navigation.helper_text or "This section is reserved for a later phase.",
+                navigation.helper_text or "该分区暂未开放。",
                 3000,
             )
             return
         self._active_filters = dict(navigation.filters)
         self._refresh_table(preserve_id=self._current_literature_id)
         self.statusBar().showMessage(
-            navigation.helper_text or f"Applied filter: {navigation.label}",
+            navigation.helper_text or f"已应用筛选：{navigation.label}",
             2500,
         )
 
@@ -1540,8 +1749,8 @@ class QtMainWindow(QMainWindow):
     ) -> None:
         self._current_literature_id = literature_id
         if literature_id is None:
-            self.detail_title.setText("Select a literature record")
-            self.detail_subtitle.setText("No record selected")
+            self.detail_title.setText("请选择一条文献记录")
+            self.detail_subtitle.setText("当前未选中文献")
             self._clear_metadata_fields()
             self._load_notes([])
             self._load_attachments([])
@@ -1558,11 +1767,11 @@ class QtMainWindow(QMainWindow):
         note_count = len(detail.get("notes", []))
         year = detail.get("year", "")
         status = detail.get("reading_status", "")
-        self.detail_title.setText(detail.get("title", "Untitled"))
+        self.detail_title.setText(detail.get("title", "未命名文献"))
         self.detail_subtitle.setText(
             " | ".join(
                 part
-                for part in [str(year) if year else "", status, f"{attachment_count} attachment(s)", f"{note_count} note(s)"]
+                for part in [str(year) if year else "", status, f"{attachment_count} 个附件", f"{note_count} 条笔记"]
                 if part
             )
         )
@@ -1600,7 +1809,7 @@ class QtMainWindow(QMainWindow):
         self.summary_edit.setPlainText(detail.get("summary", "") or "")
         self.abstract_edit.setPlainText(detail.get("abstract", "") or "")
         self.remarks_edit.setPlainText(detail.get("remarks", "") or "")
-        self.metadata_save_label.setText("Saved")
+        self.metadata_save_label.setText("已保存")
         self._loading_metadata = False
 
     def _clear_metadata_fields(self) -> None:
@@ -1656,7 +1865,7 @@ class QtMainWindow(QMainWindow):
             self.note_body_edit.setReadOnly(False)
             self.note_title_edit.setReadOnly(False)
             self.note_format_combo.setEnabled(True)
-            self.note_info_label.setText("No notes linked to this literature record.")
+            self.note_info_label.setText("当前文献尚未关联笔记。")
             self.save_note_button.setEnabled(False)
             self.open_note_file_button.setEnabled(False)
 
@@ -1682,7 +1891,7 @@ class QtMainWindow(QMainWindow):
             self.note_body_edit.setReadOnly(True)
             self.note_body_edit.setPlainText(load_note_preview(note.get("resolved_path", "")))
             self.note_info_label.setText(
-                f"Linked file note: {note.get('resolved_path', 'Unavailable')}"
+                f"已关联笔记文件：{note.get('resolved_path', '不可用')}"
             )
             self.save_note_button.setEnabled(False)
             self.open_note_file_button.setEnabled(True)
@@ -1691,7 +1900,7 @@ class QtMainWindow(QMainWindow):
             self.note_format_combo.setEnabled(True)
             self.note_body_edit.setReadOnly(False)
             self.note_body_edit.setPlainText(note.get("content", "") or "")
-            self.note_info_label.setText("Inline note content is editable here.")
+            self.note_info_label.setText("可在此直接编辑笔记内容。")
             self.save_note_button.setEnabled(True)
             self.open_note_file_button.setEnabled(False)
 
@@ -1756,7 +1965,8 @@ class QtMainWindow(QMainWindow):
             self.theme_combo.blockSignals(True)
             self.theme_combo.setCurrentIndex(selected_index)
             self.theme_combo.blockSignals(False)
-        self.statusBar().showMessage(f"Theme set to {requested} ({resolved} palette applied).", 3000)
+        theme_label = {"system": "跟随系统", "light": "浅色", "dark": "深色"}.get(requested, requested)
+        self.statusBar().showMessage(f"主题已切换为：{theme_label}。", 3000)
 
     def _current_navigation_key(self) -> str | None:
         item = self.navigation_tree.currentItem()

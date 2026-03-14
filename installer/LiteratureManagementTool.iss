@@ -3,7 +3,7 @@
 #define MyAppURL "https://github.com/Dongyurocket/literature-management-tool"
 #define MyAppExeName "Literature management tool.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.3"
+  #define MyAppVersion "0.3.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\\dist\\Literature management tool"
@@ -35,7 +35,7 @@ SetupLogging=yes
 LicenseFile=..\LICENSE
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

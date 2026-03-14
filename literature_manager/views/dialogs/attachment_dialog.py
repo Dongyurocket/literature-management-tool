@@ -17,7 +17,7 @@ from ...utils import IMPORT_MODE_LABELS, ROLE_LABELS
 class AttachmentDialog(QDialog):
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Add Attachments")
+        self.setWindowTitle("添加附件")
         self.resize(420, 220)
 
         layout = QVBoxLayout(self)
@@ -26,10 +26,10 @@ class AttachmentDialog(QDialog):
         self.role_combo = QComboBox(self)
         for code, label in ROLE_LABELS.items():
             self.role_combo.addItem(label, code)
-        form.addRow("Role", self.role_combo)
+        form.addRow("附件角色", self.role_combo)
 
         self.language_edit = QLineEdit(self)
-        form.addRow("Language", self.language_edit)
+        form.addRow("语言", self.language_edit)
 
         self.import_mode_combo = QComboBox(self)
         for code, label in IMPORT_MODE_LABELS.items():
@@ -37,9 +37,9 @@ class AttachmentDialog(QDialog):
         self.import_mode_combo.setCurrentIndex(
             max(0, self.import_mode_combo.findData(settings.default_import_mode))
         )
-        form.addRow("Import Mode", self.import_mode_combo)
+        form.addRow("导入方式", self.import_mode_combo)
 
-        self.primary_check = QCheckBox("Mark as primary attachment", self)
+        self.primary_check = QCheckBox("设为该角色的主附件", self)
         self.primary_check.setChecked(True)
         form.addRow("", self.primary_check)
 

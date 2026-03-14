@@ -14,11 +14,11 @@ class SearchBar(QWidget):
         layout.setSpacing(10)
 
         self.line_edit = QLineEdit(self)
-        self.line_edit.setPlaceholderText("Search title, author, keywords, and notes")
+        self.line_edit.setPlaceholderText("搜索标题、作者、关键词、摘要")
         self.line_edit.returnPressed.connect(self._emit_search)
         layout.addWidget(self.line_edit, stretch=1)
 
-        button = QPushButton("Search", self)
+        button = QPushButton("搜索", self)
         button.clicked.connect(self._emit_search)
         layout.addWidget(button)
 

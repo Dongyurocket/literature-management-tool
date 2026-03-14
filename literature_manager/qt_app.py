@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from .config import SettingsStore
+from .config import APP_DISPLAY_NAME, SettingsStore
 from .controllers import LibraryController
 from .viewmodels import MainWindowViewModel
 
@@ -12,7 +12,7 @@ def main() -> int:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
     except ImportError as exc:
-        raise RuntimeError("PySide6 is not installed. Run `python -m pip install .`.") from exc
+        raise RuntimeError("未安装 PySide6，请先运行 `python -m pip install .`。") from exc
     from .views import QtMainWindow
     from .views.theme import apply_theme
 
@@ -22,7 +22,7 @@ def main() -> int:
         )
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Literature management tool")
+    app.setApplicationName(APP_DISPLAY_NAME)
     settings_store = SettingsStore()
     settings = settings_store.load()
     controller = LibraryController(settings_store, settings)

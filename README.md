@@ -9,28 +9,31 @@
 
 仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
-安装版下载：[Setup.exe](https://github.com/Dongyurocket/literature-management-tool/releases/download/v0.2.3/Literature-management-tool-v0.2.3-Setup.exe)
+安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
-## V0.2.3 / Phase 4 更新
+## V0.3.0 更新
 
-这一版是一次完整的 Qt 桌面化升级，重点不是简单换皮，而是把旧功能完整迁到新的界面架构，并补齐后台任务与安装发布链路。
+这一版继续沿着 Qt 桌面版深挖，但重点已经转向“面向中文研究工作流”的完善：不仅界面整体中文化，还补上了自动更新、扫描版 PDF OCR、模板导出、多文库切换与更细的重复对比能力。
 
-- Qt 现已成为唯一 GUI 运行路径，旧 `tkinter` 界面已从仓库移除
-- 导入、DOI / ISBN 元数据抓取、PDF 批量重命名、查重、备份恢复、路径修复已迁到 Qt
-- 主界面补充线程池后台任务与非阻塞提示，拖拽导入和元数据抓取不会再卡住界面
-- 支持惰性加载表格、大数据量滚动、更清晰的导航区和工具入口
-- Windows 打包链路已验证，继续提供带安装向导的 `Setup.exe`
+- 主界面、工具对话框、设置页、统计页已切换为中文界面，默认文案面向中文用户
+- 增加 GitHub Release 更新能力，可在软件内检查新版本并下载 `Setup.exe`
+- 可在设置中一键下载安装并调用 `Umi-OCR`，也支持回退到自定义 OCR 命令
+- 元数据回退链路扩展为 `Crossref / DataCite / OpenAlex / OpenLibrary / Google Books`
+- 新增模板导出与统计报表导出，支持 Markdown / CSV / HTML / JSON
+- 支持多文库切换与归档库管理，每个文库使用独立数据库与设置文件
+- 重复检测界面升级为字段级冲突对比，支持先预览再合并
 
 ## 核心能力速览
 
 | 模块 | 当前支持 |
 | --- | --- |
-| 元数据 | GB/T 7714 常用字段、主题、关键词、一句话简介、摘要、备注、阅读状态、评分、引用键 |
+| 元数据 | GB/T 7714 常用字段、主题、关键词、一句话简介、摘要、备注、阅读状态、评分、引用键、中文化字段说明 |
 | 文件管理 | 自定义文献库目录，支持 `copy / move / link` 三种导入方式，原文 / 译文 / 补充材料多附件关联 |
 | 笔记系统 | 内置文本笔记，外部 `docx / md / txt` 笔记，支持预览与全文检索 |
-| 批量工具 | BibTeX、CSL JSON、GB/T 文本导出，PDF 批量重命名预览与执行 |
-| 维护能力 | 查重合并、缺失路径修复、备份恢复、索引重建、统计面板 |
-| 桌面体验 | PySide6 / Qt、惰性表格加载、拖拽导入、后台任务、非阻塞 toast 提示 |
+| 批量工具 | BibTeX、CSL JSON、GB/T 文本导出，Markdown / CSV / HTML 模板导出，PDF 批量重命名 |
+| 维护能力 | 查重合并、字段级重复对比、缺失路径修复、备份恢复、索引重建、统计报表 |
+| 桌面体验 | PySide6 / Qt、中文界面、惰性表格加载、拖拽导入、后台任务、非阻塞 toast 提示、软件内检查更新 |
+| 多库管理 | 多文库切换、归档库、每个文库独立数据库与设置 |
 
 ## 为什么做这个工具
 
@@ -115,33 +118,84 @@
 
 ### 6. 元数据导入与补全
 
-V2 已支持：
+当前版本支持：
 
 - DOI 查询补全元数据
 - ISBN 查询补全元数据
+- 当 DOI / ISBN 不可用或查询失败时，自动按标题回退检索
+- 元数据源可配置为 `Crossref -> DataCite -> OpenAlex -> OpenLibrary -> Google Books`
 - 从 `bib / ris / pdf / docx / md / txt` 导入资料
 - 导入中心批量扫描和导入
 
 ### 7. 检索、查重与维护
 
-V2 已支持：
+当前版本支持：
 
 - 全文检索（元数据、文本笔记、`docx` 笔记、提取到的 PDF 文本）
 - 重复文献检测与合并
+- 重复项字段级冲突对比与合并预览
 - 丢失路径扫描
 - 通过新目录扫描修复失效文件路径
 - 备份与恢复
 - 搜索索引重建
-- 统计面板
+- 统计面板与导出报表
 
-### 8. 自定义 PDF 阅读器
+### 8. OCR 与扫描版 PDF
+
+针对扫描版 PDF，本项目现在提供两种 OCR 方式：
+
+- 可以在设置中直接下载安装 `Umi-OCR`（支持 `Rapid` / `Paddle` 两个发布包）
+- 程序会自动定位 `Umi-OCR.exe`、读取 Umi 的实际 HTTP 服务端口，并调用官方文档识别接口
+- 也可以自定义 OCR 命令模板，使用 `{umi_ocr}`、`{input}`、`{output}` 占位符
+- 当 PDF 内置文本过少时，系统会自动尝试 OCR 结果作为补充
+- 也可以对当前选中的 PDF 批量重新执行 OCR 提取
+
+这样做的好处是：
+
+- 默认就能走 `Umi-OCR` 官方发布包，不需要手工找命令参数
+- 仍然保留外部命令模式，方便接入你自己的 OCR 脚本
+- 后续可以继续扩展更细的 OCR 参数和任务日志
+
+### 9. 软件内更新
+
+支持通过 GitHub Release 检查并下载更新：
+
+- 在主界面点击 `检查更新`
+- 软件会读取配置中的 GitHub 仓库（默认当前项目仓库）
+- 若存在新版本，会展示 Release 说明并支持下载 `Setup.exe`
+- 下载完成后可手动执行安装包完成升级
+
+### 10. 自定义 PDF 阅读器
 
 可以在软件设置中指定 PDF 阅读器路径。打开 PDF 附件时：
 
 - 若已配置自定义阅读器，则优先使用该软件打开
 - 若未配置，则调用系统默认程序打开
 
-### 9. Qt 桌面体验与后台任务
+### 11. 多文库与归档库
+
+当前已支持多文库模式，每个文库拥有各自独立的数据文件：
+
+- 每个文库都有独立的 `settings.json`
+- 每个文库都有独立的 `library.sqlite3`
+- 可以在主界面直接切换当前文库
+- 不常用文库可以标记为“已归档”
+- 归档不会删除数据，只是从日常工作流中隐藏
+
+### 12. 模板导出与统计报表
+
+除了 BibTeX / CSL JSON / GB/T 文本外，现还支持：
+
+- 文献模板导出
+  - `Markdown` 文献综述
+  - `CSV` 文献目录
+  - `HTML` 阅读报告
+  - `GB/T` 纯文本
+- 统计报表导出
+  - `Markdown` 统计报表
+  - `JSON` 统计报表
+
+### 13. Qt 桌面体验与后台任务
 
 Qt 版本针对高频操作补了更完整的桌面交互：
 
@@ -157,11 +211,11 @@ Qt 版本针对高频操作补了更完整的桌面交互：
 
 进入 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 下载：
 
-- `Literature-management-tool-v0.2.3-Setup.exe`
+- 当前 Release 中提供的 `Literature-management-tool-*-Setup.exe`
 
 安装版特性：
 
-- 带安装向导
+- 带中文安装向导
 - 支持开始菜单快捷方式
 - 可选桌面快捷方式
 - 自带卸载入口
@@ -199,7 +253,9 @@ python main.py
 2. 指定 `文献库目录`
 3. 选择默认导入方式
 4. 按需配置 `PDF 阅读器`
-5. 开始创建文献或导入已有资料
+5. 如果需要扫描版 PDF，在 `设置 -> OCR / 扫描版 PDF` 中点击 `下载安装`
+6. 如需内置更新，确认 `GitHub 仓库` 配置正确
+7. 开始创建文献或导入已有资料
 
 ## 典型工作流
 
@@ -237,7 +293,7 @@ python main.py
 ### 使用 DOI / ISBN 补全文献信息
 
 1. 选中文献
-2. 点击 `元数据补全`
+2. 点击 `抓取元数据`
 3. 自动或手动输入 DOI / ISBN
 4. 预览补全结果
 5. 应用缺失字段
@@ -246,7 +302,7 @@ python main.py
 
 当你手动移动过文件或更换硬盘目录时：
 
-1. 打开 `维护`
+1. 打开 `维护工具`
 2. 刷新缺失文件列表
 3. 选择可能的新目录
 4. 执行修复扫描
@@ -261,8 +317,9 @@ python main.py
 
 通常包含：
 
-- `library.sqlite3`：主数据库
-- `settings.json`：软件设置
+- `profiles/<slug>/library.sqlite3`：当前文库数据库
+- `profiles/<slug>/settings.json`：当前文库设置
+- `library_registry.json`：文库注册表
 - 备份恢复后的本地文件
 
 如果需要切换应用数据目录，可设置环境变量：
@@ -296,10 +353,13 @@ literature-management-tool/
 |  |- db.py
 |  |- dedupe_service.py
 |  |- desktop.py
+|  |- export_service.py
 |  |- import_service.py
 |  |- maintenance_service.py
 |  |- metadata_service.py
+|  |- ocr_service.py
 |  |- qt_app.py
+|  |- update_service.py
 |  |- utils.py
 |  |- controllers/
 |  |- models/
@@ -340,19 +400,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.2.3
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.0
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.2.3-Setup.exe`：带安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.3.0-Setup.exe`：带中文安装向导的 Windows 安装包
 
-当前仓库版本已实际验证可生成 `Setup.exe`，适合直接用于本地安装与 Release 上传。
+当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.2.3` 的标签时：
+当推送形如 `v0.3.0` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -377,20 +437,25 @@ python -m unittest discover -s tests -v
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.2.3 / Phase 4）
+## 当前版本亮点（V0.3.0）
 
 - Qt 成为唯一桌面界面实现，旧 Tkinter 文件已移除
 - 支持 `docx` 文件笔记与自定义 PDF 阅读器
 - 支持全文检索与搜索索引重建
+- 支持一键下载安装并调用 `Umi-OCR`，也支持外部命令模式
+- 支持 GitHub Release 检查更新与下载 `Setup.exe`
+- 支持多文库切换、归档库管理
 - 支持查重与合并
+- 支持重复项字段级对比与合并预览
 - 支持备份 / 恢复与路径修复
 - 支持 PDF 批量重命名预览与执行
 - 支持 BibTeX、CSL JSON、GB/T 7714 文本导出
+- 支持 Markdown / CSV / HTML 模板导出与统计报表导出
 - 提供 Windows 安装版 `Setup.exe`
 
 ## 已知限制
 
-- OCR 尚未实现
+- Umi-OCR 首次下载安装体积较大，需保持网络可用并等待完成
 - PDF 元数据抽取仍是尽力而为
 - 查重合并策略偏保守，需要人工确认
 - 当前不包含云同步
@@ -404,11 +469,11 @@ python -m compileall main.py literature_manager
 
 ## 后续可扩展方向
 
-- OCR 与扫描版 PDF 识别
-- 更完善的重复冲突对比界面
-- 更多元数据源回退策略
-- 导出模板与统计报表
-- 多库切换 / 归档库支持
+- 更丰富的导出模板自定义能力
+- 更细的 OCR 参数面板与任务日志
+- 更强的批量元数据清洗规则
+- 更完整的合并冲突编辑器
+- 可选的局域网同步或团队协作能力
 
 ## License
 

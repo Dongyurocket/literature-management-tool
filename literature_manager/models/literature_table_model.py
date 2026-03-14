@@ -9,7 +9,7 @@ from ..viewmodels import LiteratureTableRow
 
 
 class LiteratureTableModel(QAbstractTableModel):
-    HEADERS = ["Title", "Year", "Type", "Authors", "Subject", "Status", "Attachments"]
+    HEADERS = ["标题", "年份", "类型", "作者", "主题", "阅读状态", "附件数"]
     BATCH_SIZE = 120
 
     def __init__(self) -> None:
@@ -84,7 +84,7 @@ class LiteratureTableModel(QAbstractTableModel):
         if remaining <= 0:
             return
         self.beginInsertRows(QModelIndex(), start, start + remaining - 1)
-        self._visible_rows.extend(self._all_rows[start:start + remaining])
+        self._visible_rows.extend(self._all_rows[start : start + remaining])
         self.endInsertRows()
 
     def append_more_if_needed(self) -> None:
@@ -95,7 +95,7 @@ class LiteratureTableModel(QAbstractTableModel):
         if remaining <= 0:
             return
         self.beginInsertRows(QModelIndex(), start, start + remaining - 1)
-        self._visible_rows.extend(self._all_rows[start:start + remaining])
+        self._visible_rows.extend(self._all_rows[start : start + remaining])
         self.endInsertRows()
 
     def literature_id_at(self, row_index: int) -> int | None:

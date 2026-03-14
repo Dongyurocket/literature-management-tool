@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import shutil
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .metadata_service import extract_pdf_text
+from .ocr_service import extract_pdf_text_with_ocr
 from .utils import (
     build_attachment_name,
     build_bibtex,
@@ -192,10 +193,11 @@ LITERATURE_COLUMNS = [
 
 
 class LibraryDatabase:
-    def __init__(self, db_path: Path, library_root_getter) -> None:
+    def __init__(self, db_path: Path, library_root_getter, settings_getter=None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._library_root_getter = library_root_getter
+        self._settings_getter = settings_getter
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -327,9 +329,27 @@ class LibraryDatabase:
         total = self._fetchone("SELECT COUNT(*) AS count FROM literatures")["count"]
         attachments = self._fetchone("SELECT COUNT(*) AS count FROM attachments")["count"]
         notes = self._fetchone("SELECT COUNT(*) AS count FROM notes")["count"]
-        by_year = [dict(row) for row in self._fetchall("SELECT COALESCE(CAST(year AS TEXT), '未标注') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(year, -1) ORDER BY year DESC")]
-        by_subject = [dict(row) for row in self._fetchall("SELECT COALESCE(subject, '未分类') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(subject, '未分类') ORDER BY count DESC, label LIMIT 12")]
-        by_status = [dict(row) for row in self._fetchall("SELECT COALESCE(reading_status, '未标注') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(reading_status, '未标注') ORDER BY count DESC")]
+        by_year = [
+            dict(row)
+            for row in self._fetchall(
+                "SELECT COALESCE(CAST(year AS TEXT), '未标注') AS label, COUNT(*) AS count "
+                "FROM literatures GROUP BY COALESCE(year, -1) ORDER BY year DESC"
+            )
+        ]
+        by_subject = [
+            dict(row)
+            for row in self._fetchall(
+                "SELECT COALESCE(subject, '未分类') AS label, COUNT(*) AS count "
+                "FROM literatures GROUP BY COALESCE(subject, '未分类') ORDER BY count DESC, label LIMIT 12"
+            )
+        ]
+        by_status = [
+            dict(row)
+            for row in self._fetchall(
+                "SELECT COALESCE(reading_status, '未标注') AS label, COUNT(*) AS count "
+                "FROM literatures GROUP BY COALESCE(reading_status, '未标注') ORDER BY count DESC"
+            )
+        ]
         return {
             "total_literatures": total,
             "total_attachments": attachments,
@@ -570,10 +590,28 @@ class LibraryDatabase:
     def _extract_attachment_text(self, path: Path) -> str:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
-            return extract_pdf_text(path)
+            text = extract_pdf_text(path)
+            settings = self._settings_getter() if self._settings_getter is not None else None
+            if settings is not None:
+                return extract_pdf_text_with_ocr(path, text, settings)
+            return text
         if suffix in {".docx", ".md", ".markdown", ".txt"}:
             return load_note_content(path)
         return ""
+
+    def refresh_attachment_text(self, attachment_id: int) -> str:
+        attachment = self.get_attachment(attachment_id)
+        if not attachment:
+            raise ValueError("附件不存在。")
+        resolved_path = Path(attachment["resolved_path"])
+        text = self._extract_attachment_text(resolved_path) if resolved_path.exists() else ""
+        self.connection.execute(
+            "UPDATE attachments SET extracted_text = ?, text_extracted_at = ? WHERE id = ?",
+            (text, now_text() if text else "", attachment_id),
+        )
+        self.refresh_search_index_for_literature(int(attachment["literature_id"]))
+        self.connection.commit()
+        return text
 
     def add_attachments(
         self,
@@ -587,11 +625,11 @@ class LibraryDatabase:
     ) -> list[int]:
         literature = self.get_literature(literature_id)
         if not literature:
-            raise ValueError("文献不存在")
+            raise ValueError("文献不存在。")
 
         root = self.library_root()
         if import_mode in {"copy", "move"} and not root:
-            raise ValueError("请先配置文献库目录，再导入文件。")
+            raise ValueError("请先配置文库目录，再导入附件文件。")
 
         created_ids: list[int] = []
         folder_name = build_storage_name(literature.get("authors", []), literature.get("year"), literature["title"])
@@ -680,11 +718,11 @@ class LibraryDatabase:
     ) -> tuple[str, int, str, str]:
         source = Path(file_path).expanduser().resolve()
         if not source.exists():
-            raise ValueError("笔记文件不存在")
+            raise ValueError("笔记文件不存在。")
 
         root = self.library_root()
         if import_mode in {"copy", "move"} and not root:
-            raise ValueError("请先配置文献库目录，再导入笔记文件。")
+            raise ValueError("请先配置文库目录，再导入笔记文件。")
 
         final_path = source
         if import_mode in {"copy", "move"} and root is not None:
@@ -747,7 +785,7 @@ class LibraryDatabase:
     ) -> int:
         literature = self.get_literature(literature_id)
         if not literature:
-            raise ValueError("文献不存在")
+            raise ValueError("文献不存在。")
         now = now_text()
         external_path: str | None = None
         external_is_relative = 0
@@ -899,3 +937,5 @@ class LibraryDatabase:
                 self.refresh_search_index_for_literature(int(attachment["literature_id"]))
         self.connection.commit()
         return renamed
+
+

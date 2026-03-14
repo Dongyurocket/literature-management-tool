@@ -1,5 +1,7 @@
 import unittest
 
+from PySide6.QtCore import Qt
+
 from literature_manager.models import LiteratureTableModel
 from literature_manager.viewmodels import LiteratureTableRow
 
@@ -12,7 +14,7 @@ class LiteratureTableModelTests(unittest.TestCase):
                 literature_id=index,
                 title=f"Title {index}",
                 year="2026",
-                entry_type="Journal",
+                entry_type="期刊文章",
                 authors="Alice Example",
                 subject="UI",
                 reading_status="在读",
@@ -28,6 +30,7 @@ class LiteratureTableModelTests(unittest.TestCase):
         model.append_more_if_needed()
         self.assertGreater(model.rowCount(), model.BATCH_SIZE)
         self.assertEqual(model.total_count(), 250)
+        self.assertEqual(model.headerData(0, orientation=Qt.Orientation.Horizontal), "标题")
 
 
 if __name__ == "__main__":

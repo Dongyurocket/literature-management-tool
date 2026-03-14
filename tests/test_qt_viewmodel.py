@@ -1,96 +1,102 @@
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 from literature_manager.config import AppSettings, SettingsStore
 from literature_manager.controllers import LibraryController
 from literature_manager.viewmodels import MainWindowViewModel
 
 
-def build_controller(root: Path) -> LibraryController:
-    store = SettingsStore()
-    store.base_dir = root / "app_home"
-    store.base_dir.mkdir(parents=True, exist_ok=True)
-    store.settings_path = store.base_dir / "settings.json"
-    store.database_path = store.base_dir / "library.sqlite3"
-    settings = AppSettings(library_root=str(root / "library"))
-    store.save(settings)
-    return LibraryController(store, settings, auto_rebuild_index=False)
+@contextmanager
+def build_controller(root: Path):
+    patcher = mock.patch.dict("os.environ", {"LITERATURE_MANAGER_HOME": str(root / "app_home")})
+    patcher.start()
+    controller = None
+    try:
+        store = SettingsStore()
+        settings = AppSettings(library_root=str(root / "library"))
+        store.save(settings)
+        controller = LibraryController(store, settings, auto_rebuild_index=False)
+        yield controller
+    finally:
+        if controller is not None:
+            controller.close()
+        patcher.stop()
 
 
 class MainWindowViewModelTests(unittest.TestCase):
     def test_navigation_sections_include_dynamic_subjects_and_tags(self):
         with tempfile.TemporaryDirectory() as tmp:
-            controller = build_controller(Path(tmp))
-            controller.save_literature(
-                {
-                    "entry_type": "journal_article",
-                    "title": "Qt Navigation",
-                    "year": 2026,
-                    "subject": "Human Computer Interaction",
-                    "rating": 5,
-                    "authors": ["Alice Example"],
-                    "tags": ["qt", "prototype"],
-                    "reading_status": "在读",
-                }
-            )
+            with build_controller(Path(tmp)) as controller:
+                controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Qt Navigation",
+                        "year": 2026,
+                        "subject": "Human Computer Interaction",
+                        "rating": 5,
+                        "authors": ["Alice Example"],
+                        "tags": ["qt", "prototype"],
+                        "reading_status": "在读",
+                    }
+                )
 
-            viewmodel = MainWindowViewModel(controller)
-            sections = viewmodel.navigation_sections()
+                viewmodel = MainWindowViewModel(controller)
+                sections = viewmodel.navigation_sections()
 
-            self.assertIn("Subjects", sections)
-            self.assertTrue(any(item.label == "Human Computer Interaction" for item in sections["Subjects"]))
-            self.assertIn("Tags", sections)
-            self.assertTrue(any(item.label == "qt" for item in sections["Tags"]))
-            self.assertTrue(any(item.key == "favorites" and item.count == 1 for item in sections["Library"]))
-            controller.close()
+                self.assertIn("主题", sections)
+                self.assertTrue(any(item.label == "Human Computer Interaction" for item in sections["主题"]))
+                self.assertIn("标签", sections)
+                self.assertTrue(any(item.label == "qt" for item in sections["标签"]))
+                self.assertTrue(any(item.key == "favorites" and item.count == 1 for item in sections["文库"]))
 
     def test_list_rows_applies_tag_filters(self):
         with tempfile.TemporaryDirectory() as tmp:
-            controller = build_controller(Path(tmp))
-            controller.save_literature(
-                {
-                    "entry_type": "journal_article",
-                    "title": "Tagged Result",
-                    "year": 2026,
-                    "authors": ["Alice Example"],
-                    "tags": ["focus"],
-                }
-            )
-            controller.save_literature(
-                {
-                    "entry_type": "journal_article",
-                    "title": "Another Result",
-                    "year": 2025,
-                    "authors": ["Bob Example"],
-                    "tags": ["other"],
-                }
-            )
+            with build_controller(Path(tmp)) as controller:
+                controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Tagged Result",
+                        "year": 2026,
+                        "authors": ["Alice Example"],
+                        "tags": ["focus"],
+                    }
+                )
+                controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Another Result",
+                        "year": 2025,
+                        "authors": ["Bob Example"],
+                        "tags": ["other"],
+                    }
+                )
 
-            viewmodel = MainWindowViewModel(controller)
-            rows = viewmodel.list_rows(filters={"tag": "focus"})
+                viewmodel = MainWindowViewModel(controller)
+                rows = viewmodel.list_rows(filters={"tag": "focus"})
 
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0].title, "Tagged Result")
-            controller.close()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0].title, "Tagged Result")
 
     def test_metadata_lines_handle_empty_optional_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            controller = build_controller(Path(tmp))
-            literature_id = controller.save_literature(
-                {
-                    "entry_type": "journal_article",
-                    "title": "Sparse Record",
-                    "authors": ["Alice Example"],
-                    "tags": [],
-                }
-            )
+            with build_controller(Path(tmp)) as controller:
+                literature_id = controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Sparse Record",
+                        "authors": ["Alice Example"],
+                        "tags": [],
+                    }
+                )
 
-            viewmodel = MainWindowViewModel(controller)
-            lines = viewmodel.metadata_lines(literature_id)
+                viewmodel = MainWindowViewModel(controller)
+                lines = viewmodel.metadata_lines(literature_id)
 
-            self.assertTrue(all(isinstance(line, str) for line in lines))
-            controller.close()
+                self.assertTrue(all(isinstance(line, str) for line in lines))
+                self.assertTrue(any(line.startswith("标题：") for line in lines))
 
 
 if __name__ == "__main__":
