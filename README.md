@@ -1,130 +1,249 @@
 ﻿# Literature management tool
 
-`Literature management tool` is a local-first desktop application for managing academic literature, PDFs, notes, BibTeX data, and full-text search. It is built with `tkinter + sqlite3 + pypdf`, works well on Windows, and keeps your data on your own machine by default.
+![Release](https://img.shields.io/github/v/release/Dongyurocket/literature-management-tool?display_name=tag)
+![License](https://img.shields.io/github/license/Dongyurocket/literature-management-tool)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 
-## Overview
+一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + tkinter + sqlite3 + pypdf` 构建，默认本地存储，不依赖服务器即可运行。
 
-This project is designed for researchers, graduate students, engineers, and anyone who needs a practical reference manager without setting up a server.
+仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
+最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)
 
-The application focuses on five things:
+## 为什么做这个工具
 
-1. structured literature metadata
-2. reliable attachment management
-3. practical note-taking workflows
-4. export and citation support
-5. long-term maintainability of local data
+很多轻量文献工具只能保存标题和 PDF，难以覆盖国内常用的 GB/T 7714-2015 参考文献整理需求，也不方便把原文、翻译稿、阅读笔记、导出文件统一管理。本项目重点解决以下问题：
 
-## Core Capabilities
+- 文献信息字段不完整，难以满足国标参考文献整理
+- PDF、译文、补充材料、笔记分散在多个文件夹，后期难维护
+- 现有资料批量导入困难，BibTeX 输出不顺手
+- 笔记既想支持内置文本，也想关联 `docx / md / txt` 外部文件
+- 本地移动文件后路径失效，缺少修复、查重、备份和恢复能力
 
-### 1. Literature Metadata Management
+## 首页预览
 
-Each literature record supports common fields needed for GB/T 7714-2015 style reference management, including:
+### 主界面
 
-- entry type
-- title
-- translated title / subtitle
-- authors in order
-- journal / book / conference information
-- publisher / school / institution
-- year, month, volume, issue, pages
-- DOI / ISBN / URL / language / country
-- subject, keywords, summary, abstract, remarks
-- reading status, rating, tags, cite key
+![主界面截图](docs/screenshots/main-overview.png)
 
-Supported entry types include:
+### 文献信息编辑
 
-- journal article
-- book
-- thesis
-- conference paper
-- standard
-- patent
-- report
-- webpage
-- misc
+![文献信息截图](docs/screenshots/literature-editor.png)
 
-### 2. Attachment Management
+### 设置与阅读器配置
 
-A single literature record can contain multiple attachments, such as:
+![设置截图](docs/screenshots/settings-dialog.png)
 
-- original PDF
-- translated PDF or manuscript
-- supplementary material
-- note files
+## 功能总览
 
-Import modes:
+### 1. 文献信息管理
 
-- `copy`: copy selected files into the configured library root
-- `move`: move selected files into the configured library root
-- `link`: keep files in place and only store references
+每条文献都可以维护完整的结构化元数据，覆盖 GB/T 7714-2015 常见整理字段，并额外支持研究流程需要的信息：
 
-The application also supports standardized PDF renaming using a rule like:
+- 文献类型：期刊论文、图书、学位论文、会议论文、标准、专利、报告、网页、其他
+- 标题、译名 / 副标题
+- 作者列表（保留顺序）
+- 期刊 / 书名 / 会议名 / 出版社 / 学校 / 机构
+- 年、月、卷、期、页码
+- DOI、ISBN、URL、语言、国家 / 地区
+- 主题、关键词、一句话简介、摘要、备注
+- 阅读状态、评分、标签、引用键
 
-- `Author_Year_Title_Original.pdf`
-- `Author_Year_Title_Translation.pdf`
+### 2. 文献文件管理
 
-### 3. Notes
+你可以自定义文献库目录，并将文献附件与软件关联。每条文献可以挂接多个文件：
 
-Two note models are supported:
+- 原文 PDF
+- 翻译稿 PDF
+- 补充材料
+- 数据文件
+- 笔记文件
 
-- built-in text notes stored in the database
-- external note files linked to the literature record
+支持三种导入方式：
 
-Supported external note file formats:
+- `copy`：复制到文献库目录
+- `move`：移动到文献库目录
+- `link`：保留原位置，仅记录关联关系
+
+### 3. PDF 自动命名
+
+支持按规则批量重命名 PDF，命名逻辑为：
+
+- `作者_年份_标题_Original.pdf`
+- `作者_年份_标题_Translation.pdf`
+
+同名冲突会自动追加序号，避免覆盖已有文件。
+
+### 4. 笔记系统
+
+每条文献既可以使用内置文本笔记，也可以关联外部笔记文件。
+
+支持的外部笔记格式：
 
 - `docx`
 - `md`
 - `txt`
 
-A note can be linked to multiple attachments, which is useful if one reading note belongs to several related files.
+并且支持：
 
-### 4. Metadata Import and Enrichment
+- 一个笔记关联多个附件
+- 一个文献维护多条笔记
+- 文件笔记与文本笔记混合使用
+- 预览外部笔记内容并参与全文检索
 
-The app can enrich metadata using:
+### 5. 批量导出与引用
 
-- DOI lookup
-- ISBN lookup
+支持从当前选择的多条文献中批量生成：
 
-It can also import from:
+- `BibTeX (.bib)`
+- `CSL JSON (.json)`
+- 国标 GB/T 7714 参考文献文本（可直接复制到剪贴板）
 
-- `bib`
-- `ris`
-- `pdf`
-- `docx`
-- `md`
-- `txt`
+### 6. 元数据导入与补全
 
-Batch import is supported through the Import Center.
+V2 已支持：
 
-### 5. Search, Deduplication, and Maintenance
+- DOI 查询补全元数据
+- ISBN 查询补全元数据
+- 从 `bib / ris / pdf / docx / md / txt` 导入资料
+- 导入中心批量扫描和导入
 
-V2 includes:
+### 7. 检索、查重与维护
 
-- duplicate detection and merge
-- full-text search across metadata, notes, docx files, and extracted PDF text
-- missing path detection
-- repair by scanning a replacement folder
-- backup and restore
-- search index rebuild
-- statistics dashboard
+V2 已支持：
 
-### 6. Citation Export
+- 全文检索（元数据、文本笔记、`docx` 笔记、提取到的 PDF 文本）
+- 重复文献检测与合并
+- 丢失路径扫描
+- 通过新目录扫描修复失效文件路径
+- 备份与恢复
+- 搜索索引重建
+- 统计面板
 
-The application supports:
+### 8. 自定义 PDF 阅读器
 
-- BibTeX export
-- CSL JSON export
-- copying GB/T reference text directly to clipboard
+可以在软件设置中指定 PDF 阅读器路径。打开 PDF 附件时：
 
-## Technology Stack
+- 若已配置自定义阅读器，则优先使用该软件打开
+- 若未配置，则调用系统默认程序打开
 
-- UI: `tkinter`
-- storage: `sqlite3`
-- PDF parsing: `pypdf`
-- packaging: `PyInstaller`
-- release automation: GitHub Actions
+## 安装方式
 
-## Repository Structure
+### 推荐：下载 Windows 安装版 `Setup.exe`
+
+进入 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 下载：
+
+- `Literature-management-tool-v0.2.2-Setup.exe`
+
+安装版特性：
+
+- 带安装向导
+- 支持开始菜单快捷方式
+- 可选桌面快捷方式
+- 自带卸载入口
+- 默认安装到当前用户目录，无需管理员权限
+
+注意：卸载程序不会主动删除你的文献数据库和文献库文件，已有数据会保留在本地。
+
+### 从源码运行
+
+环境要求：
+
+- Windows 10 / 11
+- Python `3.11+`
+
+安装依赖：
+
+```bash
+python -m pip install -U pip
+python -m pip install pypdf
+```
+
+启动程序：
+
+```bash
+python main.py
+```
+
+## 首次使用建议
+
+第一次启动后，建议按下面顺序完成初始化：
+
+1. 打开 `设置`
+2. 指定 `文献库目录`
+3. 选择默认导入方式
+4. 按需配置 `PDF 阅读器`
+5. 开始创建文献或导入已有资料
+
+## 典型工作流
+
+### 手动录入一篇文献
+
+1. 点击 `新建文献`
+2. 填写标题、作者、年份、主题、关键词、一句话简介等字段
+3. 补充 DOI / ISBN / 摘要 / 备注等信息
+4. 保存文献
+5. 添加原文、译文或其他附件
+6. 在 `笔记` 区添加文本笔记或关联 `docx` 笔记
+
+### 批量导入已有资料
+
+1. 点击 `导入中心`
+2. 选择文件或整个目录
+3. 审核扫描结果
+4. 选择导入方式（复制 / 移动 / 仅关联）
+5. 执行导入
+
+### 批量导出 Bib 文件
+
+1. 在主列表中多选文献
+2. 点击 `导出 Bib`
+3. 选择输出位置
+4. 生成 `.bib` 文件
+
+### 批量重命名 PDF
+
+1. 选中一条或多条文献
+2. 点击 `重命名 PDF`
+3. 预览命名结果
+4. 确认执行
+
+### 使用 DOI / ISBN 补全文献信息
+
+1. 选中文献
+2. 点击 `元数据补全`
+3. 自动或手动输入 DOI / ISBN
+4. 预览补全结果
+5. 应用缺失字段
+
+### 路径修复
+
+当你手动移动过文件或更换硬盘目录时：
+
+1. 打开 `维护`
+2. 刷新缺失文件列表
+3. 选择可能的新目录
+4. 执行修复扫描
+
+## 数据存储说明
+
+程序默认采用本地优先存储。
+
+默认数据目录：
+
+- `%APPDATA%\Literature management tool`
+
+通常包含：
+
+- `library.sqlite3`：主数据库
+- `settings.json`：软件设置
+- 备份恢复后的本地文件
+
+如果需要切换应用数据目录，可设置环境变量：
+
+- `LITERATURE_MANAGER_HOME`
+
+## 目录结构
 
 ```text
 literature-management-tool/
@@ -138,248 +257,109 @@ literature-management-tool/
 |  |- metadata_service.py
 |  |- ui.py
 |  |- utils.py
-|- tests/
+|- installer/
+|  |- LiteratureManagementTool.iss
 |- scripts/
 |  |- build_windows.ps1
+|- tests/
+|- docs/
+|  |- screenshots/
+|  |- releases/
 |- .github/workflows/
 |  |- build-windows-release.yml
 |- LiteratureManagementTool.spec
+|- LICENSE
+|- README.md
 |- main.py
 |- pyproject.toml
-|- README.md
 ```
 
-## Running From Source
+## 本地打包
 
-### Requirements
+### 生成 Windows 安装包
 
-- Windows 10 or Windows 11 recommended
-- Python `3.11+`
-- network access only needed when using DOI / ISBN lookup
-
-### Install dependencies
-
-```bash
-python -m pip install -U pip
-python -m pip install pypdf
-```
-
-If you want to run packaging locally:
+先安装打包依赖：
 
 ```bash
 python -m pip install pyinstaller
 ```
 
-### Start the app
-
-```bash
-python main.py
-```
-
-## Data Storage
-
-Application data is stored outside the repository by default.
-
-Default path:
-
-- `%APPDATA%\Literature management tool`
-
-Contents typically include:
-
-- `library.sqlite3`
-- `settings.json`
-- restored files after backup restore
-
-You can override the application data directory by setting:
-
-- `LITERATURE_MANAGER_HOME`
-
-## First-Run Setup
-
-Recommended first steps:
-
-1. open `Settings`
-2. choose a `library root`
-3. choose the default import mode
-4. optionally configure a custom PDF reader executable
-5. start importing literature
-
-## Main Workflows
-
-### Create a literature record manually
-
-1. click `新建文献`
-2. fill in metadata fields
-3. add authors in order
-4. save the record
-5. attach PDFs or supplementary files
-
-### Batch import existing files
-
-1. click `导入中心`
-2. select files or a folder
-3. review scanned items
-4. choose import mode
-5. import selected items
-
-### Enrich metadata with DOI / ISBN
-
-1. select a literature record
-2. click `元数据补全`
-3. if DOI or ISBN already exists, the app uses it directly
-4. otherwise input DOI or ISBN manually
-5. review the preview dialog
-6. apply missing-field updates
-
-### Attach files
-
-1. select a literature record
-2. click `添加附件`
-3. select one or more files
-4. choose role and import mode
-5. save
-
-### Add notes
-
-For text notes:
-
-1. go to the `笔记` tab
-2. click `新增文本`
-3. write the note
-4. optionally link attachments
-
-For external note files:
-
-1. go to the `笔记` tab
-2. click `关联文件`
-3. choose `docx`, `md`, or `txt`
-4. optionally link attachments
-
-### Search across the library
-
-1. click `全文搜索`
-2. input keywords
-3. double-click a result to jump to the record
-
-### Merge duplicates
-
-1. click `查重`
-2. review duplicate groups
-3. select the primary record to keep
-4. merge the remaining records into it
-
-### Repair missing file paths
-
-1. click `维护`
-2. refresh missing files
-3. click repair
-4. select the folder that may contain the moved files
-
-### Backup and restore
-
-In `维护`:
-
-- `创建备份` creates a zip containing database, settings, and library files if configured
-- `恢复备份` restores those items and refreshes the app state
-
-## Full-Text Search Scope
-
-The search index includes:
-
-- title
-- translated title
-- authors
-- subject
-- keywords
-- summary
-- abstract
-- built-in note text
-- external note file text
-- extracted PDF text when available
-
-## PDF Reader Integration
-
-If a custom PDF reader executable is configured in `Settings`, opening a PDF attachment uses that program first. If not configured, the system default handler is used.
-
-## Windows Packaging
-
-### Build locally
+再安装 Inno Setup（任选其一）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.2.1
+winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 ```
 
-Generated outputs:
+执行打包：
 
-- `dist\Literature management tool\` - unpacked runnable folder
-- `dist\Literature-management-tool-v0.2.1-windows-x64.zip` - release archive
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.2.2
+```
 
-### Packaging files
+输出内容：
 
-- `LiteratureManagementTool.spec`
-- `scripts/build_windows.ps1`
-- `.github/workflows/build-windows-release.yml`
+- `dist\Literature management tool\`：PyInstaller 生成的可运行目录
+- `dist\Literature-management-tool-v0.2.2-Setup.exe`：带安装向导的 Windows 安装包
 
-### Notes
+### GitHub Actions 自动发布
 
-- the current release format is a zipped portable build, not an installer
-- the executable is built with PyInstaller in windowed mode
-- README is copied into the packaged output folder
+当推送形如 `v0.2.2` 的标签时：
 
-## GitHub Release Workflow
+1. GitHub Actions 在 Windows runner 上检出代码
+2. 安装 Python 依赖和 Inno Setup
+3. 运行 `scripts/build_windows.ps1`
+4. 将 `Setup.exe` 上传到对应 Release
 
-A GitHub Actions workflow is included.
-
-When a tag like `v0.2.1` is pushed:
-
-1. GitHub Actions checks out the repo on Windows
-2. installs Python and dependencies
-3. runs the PowerShell build script
-4. uploads the generated zip to the matching GitHub Release
-
-Workflow file:
+工作流文件：
 
 - `.github/workflows/build-windows-release.yml`
 
-## Testing
+## 测试
 
-Run the full test suite with:
+运行单元测试：
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Optional syntax check:
+可选语法检查：
 
 ```bash
 python -m compileall main.py literature_manager
 ```
 
-## Current Limitations
+## 当前版本亮点（V2）
 
-- no installer wizard yet; distribution is a portable zip
-- OCR is not implemented
-- PDF metadata extraction is best-effort only
-- duplicate merge is intentionally conservative and UI-assisted
-- there is no cloud sync in the current version
+- 支持 `docx` 文件笔记
+- 支持自定义 PDF 阅读器
+- 支持全文检索与搜索索引重建
+- 支持查重与合并
+- 支持备份 / 恢复与路径修复
+- 支持 BibTeX、CSL JSON、GB/T 7714 文本导出
+- 提供 Windows 安装版 `Setup.exe`
 
-## Security and Privacy
+## 已知限制
 
-- literature data is stored locally by default
-- DOI / ISBN enrichment sends only lookup identifiers to external services
-- backup archives may contain your documents; store them securely
-- if you make the repository public, review the repo contents carefully before publishing future changes
+- OCR 尚未实现
+- PDF 元数据抽取仍是尽力而为
+- 查重合并策略偏保守，需要人工确认
+- 当前不包含云同步
 
-## Suggested Next Improvements
+## 隐私与安全
 
-- add an installer-based Windows setup package
-- add OCR for scanned PDFs
-- improve duplicate conflict resolution UI
-- add richer metadata provider fallback logic
-- add export templates and report generation
+- 默认所有文献数据都保存在本地
+- DOI / ISBN 补全只会发送查询标识到外部服务
+- 备份压缩包可能包含你的原始文献文件，请自行妥善保管
+- 若仓库保持公开，提交前请确认没有把个人资料或文献原文一并上传
 
-## Version
+## 后续可扩展方向
 
-Current packaged release target in this repository:
+- OCR 与扫描版 PDF 识别
+- 更完善的重复冲突对比界面
+- 更多元数据源回退策略
+- 导出模板与统计报表
+- 多库切换 / 归档库支持
 
-- `v0.2.1`
+## License
+
+本项目采用 [MIT License](LICENSE)。
