@@ -676,10 +676,16 @@ class UpdateInfoDialog(QDialog):
             f"发布时间：{release_info.get('published_at', '')}",
             f"发布页：{release_info.get('html_url', '')}",
             f"安装包：{release_info.get('asset_name', '') or '未找到'}",
-            "",
-            "Release 说明：",
-            release_info.get("body", "") or "暂无说明。",
         ]
+        if release_info.get("update_lookup_notice"):
+            body_lines.extend(["", f"提示：{release_info.get('update_lookup_notice', '')}"])
+        body_lines.extend(
+            [
+                "",
+                "Release 说明：",
+                release_info.get("body", "") or "暂无说明。",
+            ]
+        )
         text.setPlainText("\n".join(body_lines))
         layout.addWidget(text)
 

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from urllib import error
 from unittest import mock
 
 from literature_manager.config import AppSettings, SettingsStore
@@ -238,6 +239,83 @@ class OcrAndUpdateTests(unittest.TestCase):
             result = check_latest_release("owner/repo", "0.3.0")
         self.assertTrue(result["is_update_available"])
         self.assertTrue(result["asset_name"].endswith("Setup.exe"))
+
+    def test_check_latest_release_falls_back_to_web_when_api_403(self):
+        fallback_payload = {
+            "repo": "owner/repo",
+            "current_version": "0.3.1",
+            "latest_version": "0.3.2",
+            "is_update_available": True,
+            "release_name": "v0.3.2",
+            "published_at": "2026-03-15T00:00:00Z",
+            "body": "web fallback body",
+            "html_url": "https://github.com/owner/repo/releases/tag/v0.3.2",
+            "asset_name": "Literature-management-tool-v0.3.2-Setup.exe",
+            "asset_url": "https://github.com/owner/repo/releases/download/v0.3.2/Literature-management-tool-v0.3.2-Setup.exe",
+            "update_lookup_source": "web",
+        }
+        api_403 = error.HTTPError(
+            url="https://api.github.com/repos/owner/repo/releases/latest",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=None,
+        )
+        try:
+            with mock.patch(
+                "literature_manager.update_service._get_json",
+                side_effect=api_403,
+            ), mock.patch(
+                "literature_manager.update_service._check_latest_release_via_web",
+                return_value=fallback_payload,
+            ) as web_fallback_mock:
+                result = check_latest_release("owner/repo", "0.3.1")
+        finally:
+            api_403.close()
+        web_fallback_mock.assert_called_once_with("owner/repo", "0.3.1")
+        self.assertEqual(result["latest_version"], "0.3.2")
+        self.assertEqual(result["update_lookup_source"], "web")
+        self.assertIn("回退", result.get("update_lookup_notice", ""))
+
+    def test_check_latest_release_keeps_http_error_when_web_fallback_fails(self):
+        api_403 = error.HTTPError(
+            url="https://api.github.com/repos/owner/repo/releases/latest",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=None,
+        )
+        try:
+            with mock.patch(
+                "literature_manager.update_service._get_json",
+                side_effect=api_403,
+            ), mock.patch(
+                "literature_manager.update_service._check_latest_release_via_web",
+                side_effect=error.URLError("offline"),
+            ):
+                with self.assertRaisesRegex(ValueError, "HTTP 403"):
+                    check_latest_release("owner/repo", "0.3.1")
+        finally:
+            api_403.close()
+
+    def test_check_latest_release_keeps_url_error_when_web_fallback_fails(self):
+        fallback_500 = error.HTTPError(
+            url="https://github.com/owner/repo/releases/latest",
+            code=500,
+            msg="Server Error",
+            hdrs=None,
+            fp=None,
+        )
+        with mock.patch(
+            "literature_manager.update_service._get_json",
+            side_effect=error.URLError("temporary outage"),
+        ), mock.patch(
+            "literature_manager.update_service._check_latest_release_via_web",
+            side_effect=fallback_500,
+        ):
+            with self.assertRaisesRegex(ValueError, "temporary outage"):
+                check_latest_release("owner/repo", "0.3.1")
+        fallback_500.close()
 
 
 if __name__ == "__main__":
