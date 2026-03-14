@@ -11,6 +11,15 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
+## V0.3.3 热修复
+
+这一版聚焦“检查更新”的稳定性，修复部分环境下 GitHub API 返回 `HTTP 403` 直接报错的问题。
+
+- 检查更新支持自动回退到 Release 网页解析（API 403 / 429 / 网络异常时）
+- 支持读取 `GITHUB_TOKEN` / `GH_TOKEN`，提升受限网络下的成功率
+- 更新弹窗新增来源提示，明确当前是 API 结果还是网页回退结果
+- 补充对应单元测试，覆盖回退成功和回退失败两条路径
+
 ## V0.3.2 更新
 
 这一版聚焦“可感知反馈 + 稳定性收敛”：新增文献列表手动刷新，并继续修复“操作已完成但右下角仍显示正在运行”的问题，同时补齐元数据合并与可编辑性的细节体验。

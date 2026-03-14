@@ -11,7 +11,7 @@ from urllib import error, parse, request
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_RELEASES_LATEST = "https://github.com/{repo}/releases/latest"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.2",
+    "User-Agent": "LiteratureManagementTool/0.3.3",
     "Accept": "application/vnd.github+json",
 }
 
