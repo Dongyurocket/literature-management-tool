@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 
-一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + PySide6 + sqlite3 + pypdf` 构建，默认本地存储，不依赖服务器即可运行。
+一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + PySide6 + sqlite3 + pypdf` 构建，现已完成 Qt 桌面版迁移，默认本地存储，不依赖服务器即可运行。
 
 仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)
@@ -13,6 +13,16 @@
 ![Project cover](docs/social-preview.png)
 
 说明：README 与 Release 中使用的界面截图已对本地路径等隐私地址做打码处理。
+
+## V0.2.3 / Phase 4 更新
+
+这一版是一次完整的 Qt 桌面化升级，重点不是简单换皮，而是把旧功能完整迁到新的界面架构，并补齐后台任务与安装发布链路。
+
+- Qt 现已成为唯一 GUI 运行路径，旧 `tkinter` 界面已从仓库移除
+- 导入、DOI / ISBN 元数据抓取、PDF 批量重命名、查重、备份恢复、路径修复已迁到 Qt
+- 主界面补充线程池后台任务与非阻塞提示，拖拽导入和元数据抓取不会再卡住界面
+- 支持惰性加载表格、大数据量滚动、更清晰的导航区和工具入口
+- Windows 打包链路已验证，继续提供带安装向导的 `Setup.exe`
 
 ## 为什么做这个工具
 
@@ -131,13 +141,23 @@ V2 已支持：
 - 若已配置自定义阅读器，则优先使用该软件打开
 - 若未配置，则调用系统默认程序打开
 
+### 9. Qt 桌面体验与后台任务
+
+Qt 版本针对高频操作补了更完整的桌面交互：
+
+- 惰性加载文献表格，大批量数据滚动更流畅
+- 支持文件和文件夹拖拽导入
+- 维护中心、导入中心、全文检索、查重、重命名等功能集中到统一工具入口
+- 后台任务执行期间使用状态栏进度和 toast 提示，避免长任务阻塞界面
+- 通过 controller 克隆隔离数据库连接，减少跨线程 SQLite 读写冲突
+
 ## 安装方式
 
 ### 推荐：下载 Windows 安装版 `Setup.exe`
 
 进入 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 下载：
 
-- `Literature-management-tool-v0.2.2-Setup.exe`
+- `Literature-management-tool-v0.2.3-Setup.exe`
 
 安装版特性：
 
@@ -168,6 +188,8 @@ python -m pip install .
 ```bash
 python main.py
 ```
+
+如果你需要自己打包安装版，请直接看后面的“本地打包”章节。
 
 ## 首次使用建议
 
@@ -247,6 +269,23 @@ python main.py
 
 - `LITERATURE_MANAGER_HOME`
 
+## 技术架构
+
+当前代码已按 Qt 桌面应用的职责拆分：
+
+- `controllers/`：协调数据库、导入、查重、维护、导出等业务流程
+- `viewmodels/`：为 Qt 视图整理导航、表格行和详情展示数据
+- `views/`：主窗口、工具对话框、主题、toast、搜索条、后台任务等 Qt 组件
+- `models/`：`QAbstractTableModel` 等 Qt 数据模型
+- `desktop.py`：本地文件打开、定位、调用自定义 PDF 阅读器
+- `db.py` 与各类 `*_service.py`：本地持久化与领域能力
+
+这样做的主要收益：
+
+- 更容易继续扩展 GUI，而不是把所有逻辑塞进单个界面文件
+- 更适合后续补自动化测试
+- 更利于把长耗时任务切到后台线程执行
+
 ## 目录结构
 
 ```text
@@ -256,10 +295,16 @@ literature-management-tool/
 |  |- config.py
 |  |- db.py
 |  |- dedupe_service.py
+|  |- desktop.py
 |  |- import_service.py
 |  |- maintenance_service.py
 |  |- metadata_service.py
+|  |- qt_app.py
 |  |- utils.py
+|  |- controllers/
+|  |- models/
+|  |- viewmodels/
+|  |- views/
 |- installer/
 |  |- LiteratureManagementTool.iss
 |- scripts/
@@ -296,17 +341,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.2.2
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.2.3
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.2.2-Setup.exe`：带安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.2.3-Setup.exe`：带安装向导的 Windows 安装包
+
+当前仓库版本已实际验证可生成 `Setup.exe`，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.2.2` 的标签时：
+当推送形如 `v0.2.3` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -331,13 +378,14 @@ python -m unittest discover -s tests -v
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V2）
+## 当前版本亮点（V0.2.3 / Phase 4）
 
-- 支持 `docx` 文件笔记
-- 支持自定义 PDF 阅读器
+- Qt 成为唯一桌面界面实现，旧 Tkinter 文件已移除
+- 支持 `docx` 文件笔记与自定义 PDF 阅读器
 - 支持全文检索与搜索索引重建
 - 支持查重与合并
 - 支持备份 / 恢复与路径修复
+- 支持 PDF 批量重命名预览与执行
 - 支持 BibTeX、CSL JSON、GB/T 7714 文本导出
 - 提供 Windows 安装版 `Setup.exe`
 

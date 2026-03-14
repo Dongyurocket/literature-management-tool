@@ -3,7 +3,7 @@
 #define MyAppURL "https://github.com/Dongyurocket/literature-management-tool"
 #define MyAppExeName "Literature management tool.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.2"
+  #define MyAppVersion "0.2.3"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\\dist\\Literature management tool"
