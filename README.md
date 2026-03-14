@@ -11,31 +11,31 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
-## V0.3.1 更新
+## V0.3.2 更新
 
-这一版重点补齐两条线：一是中文研究场景下的元数据抓取质量，二是 Qt 高频交互下的稳定性。现在已经支持从高校图书馆 OpenURL 与 CNKI 抓取可用元数据字段，并修复了部分异步任务明明完成但界面仍显示“正在进行中”的状态问题。
+这一版聚焦“可感知反馈 + 稳定性收敛”：新增文献列表手动刷新，并继续修复“操作已完成但右下角仍显示正在运行”的问题，同时补齐元数据合并与可编辑性的细节体验。
 
-- 元数据回退链路扩展为 `Crossref / DataCite / OpenAlex / CNKI / USTC OpenURL / THU OpenURL / OpenLibrary / Google Books`
-- 支持从图书馆 OpenURL 解析器补充在线检索到的可用字段，并保留检索链接
-- 支持从知网抓取中文文章的可用元数据字段
-- 元数据字段允许部分补全，未抓到的字段可留空并继续手动编辑
-- 修复后台任务状态显示问题（如 PDF 重命名、Umi 下载、软件更新下载）
-- 补充 Qt 交互回归测试，覆盖任务回调异常、嵌套任务状态恢复等高风险路径
-- 已完成 Windows 安装包打包与静默安装 / 卸载 / 启动烟雾验证
+- 新增文献列表刷新能力（顶部 `刷新列表` 按钮 + `F5` 快捷键）
+- 刷新前自动保存当前编辑中的元数据，避免刷新后内容丢失
+- 增加后台任务状态守护，异常残留时可自动恢复到“就绪”
+- 元数据抓取改为每次仅使用一个已选来源，避免多源混合回退
+- 优化元数据合并：支持替换占位标题、作者去重合并、关键词去重合并
+- 引用键（cite_key）支持手动编辑并自动保存
+- 已完成 Windows 安装包打包与启动烟雾验证，回归测试通过
 
-### 新界面截图（v0.3.1）
+### 新界面截图（v0.3.2，界面布局延续 v0.3.1）
 
 主界面（文献列表、详情编辑、顶部工具入口）：
 
-![v0.3.1 主界面](docs/screenshots/v0.3.1-main-window.png)
+![v0.3.2 主界面](docs/screenshots/v0.3.2-main-window.png)
 
 设置页（元数据源、OCR、更新配置）：
 
-![v0.3.1 设置页](docs/screenshots/v0.3.1-settings.png)
+![v0.3.2 设置页](docs/screenshots/v0.3.2-settings.png)
 
 更新对话框（版本信息与下载入口）：
 
-![v0.3.1 更新对话框](docs/screenshots/v0.3.1-update-dialog.png)
+![v0.3.2 更新对话框](docs/screenshots/v0.3.2-update-dialog.png)
 
 ## 核心能力速览
 
@@ -417,19 +417,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.1
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.2
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.3.1-Setup.exe`：带中文安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.3.2-Setup.exe`：带中文安装向导的 Windows 安装包
 
 当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.3.1` 的标签时：
+当推送形如 `v0.3.2` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -454,17 +454,17 @@ python -m unittest discover -s tests -v
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.3.1）
+## 当前版本亮点（V0.3.2）
 
-- 新增 `CNKI / USTC OpenURL / THU OpenURL` 元数据回退源，提升中文文献可补全率
-- 元数据抓取支持“部分字段即返回”，并保留手动编辑空间，避免全有或全无
-- 修复异步任务状态残留：任务成功后会正确回到“就绪”，不再卡住“正在进行中”
-- 加强 Qt 异步回调异常保护，避免回调报错导致 UI 状态无法收敛
-- 新增 Qt 交互回归测试，覆盖重命名、更新下载、Umi 安装等易回归场景
+- 新增文献列表手动刷新能力（按钮 + `F5`），并提供明确反馈
+- 刷新前自动保存当前编辑中的元数据，减少误操作导致的数据丢失
+- 修复多处“任务已完成但状态栏仍显示运行中”的残留问题
+- 增加后台任务状态守护机制，异常残留时可自动恢复到“就绪”
+- 元数据抓取改为每次仅使用一个已选来源，避免多源混合回退
+- 元数据合并增强：支持占位标题替换、作者去重合并、关键词去重合并
+- 引用键（cite_key）支持手动编辑并自动保存
 - 支持一键下载安装并调用 `Umi-OCR`，并可读取实际服务端口调用 OCR 接口
 - 支持 GitHub Release 检查更新与下载 `Setup.exe`
-- 支持多文库切换、归档库管理、查重合并、路径修复、备份恢复
-- 支持 BibTeX / CSL JSON / GB/T 7714 导出，以及 Markdown / CSV / HTML / JSON 报表导出
 - 提供 Windows 安装版 `Setup.exe`，可用于本地部署与自动发布
 
 ## 已知限制
