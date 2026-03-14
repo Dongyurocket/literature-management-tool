@@ -155,10 +155,15 @@ class SettingsDialog(QDialog):
         sources_box = QGroupBox("元数据回退顺序")
         sources_layout = QGridLayout(sources_box)
         self.metadata_source_checks: dict[str, QCheckBox] = {}
-        active_sources = set(settings.metadata_sources or DEFAULT_METADATA_SOURCES)
+        self._syncing_metadata_source_checks = False
+        configured_sources = [item for item in (settings.metadata_sources or []) if item in DEFAULT_METADATA_SOURCES]
+        selected_source = configured_sources[0] if configured_sources else DEFAULT_METADATA_SOURCES[0]
         for index, source_key in enumerate(DEFAULT_METADATA_SOURCES):
             checkbox = QCheckBox(METADATA_SOURCE_LABELS[source_key], self)
-            checkbox.setChecked(source_key in active_sources)
+            checkbox.setChecked(source_key == selected_source)
+            checkbox.toggled.connect(
+                lambda checked, key=source_key: self._on_metadata_source_toggled(key, checked)
+            )
             self.metadata_source_checks[source_key] = checkbox
             sources_layout.addWidget(checkbox, index // 2, index % 2)
         update_layout.addWidget(sources_box)
@@ -182,7 +187,7 @@ class SettingsDialog(QDialog):
     def value(self) -> AppSettings:
         selected_sources = [
             key for key, checkbox in self.metadata_source_checks.items() if checkbox.isChecked()
-        ] or list(DEFAULT_METADATA_SOURCES)
+        ] or [DEFAULT_METADATA_SOURCES[0]]
         return AppSettings(
             library_root=self.library_root_edit.text().strip(),
             default_import_mode=str(self.import_mode_combo.currentData()),
@@ -198,6 +203,27 @@ class SettingsDialog(QDialog):
             metadata_sources=selected_sources,
             preferred_export_template=str(self.export_template_combo.currentData()),
         )
+
+    def _on_metadata_source_toggled(self, source_key: str, checked: bool) -> None:
+        if self._syncing_metadata_source_checks:
+            return
+        if checked:
+            self._syncing_metadata_source_checks = True
+            try:
+                for other_key, checkbox in self.metadata_source_checks.items():
+                    if other_key != source_key and checkbox.isChecked():
+                        checkbox.setChecked(False)
+            finally:
+                self._syncing_metadata_source_checks = False
+            return
+
+        if any(checkbox.isChecked() for checkbox in self.metadata_source_checks.values()):
+            return
+        self._syncing_metadata_source_checks = True
+        try:
+            self.metadata_source_checks[source_key].setChecked(True)
+        finally:
+            self._syncing_metadata_source_checks = False
 
     def _browse_library_root(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "选择文库目录")

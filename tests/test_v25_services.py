@@ -99,6 +99,31 @@ class MetadataFallbackTests(unittest.TestCase):
                 lookup_isbn_mock.assert_called_once()
                 self.assertEqual(payload["source_provider"], "OpenLibrary")
 
+    def test_controller_uses_only_one_selected_metadata_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                controller.settings.metadata_sources = ["crossref", "openalex", "cnki"]
+                literature_id = controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Single Provider",
+                        "year": 2025,
+                        "doi": "10.1000/demo",
+                        "authors": ["Alice Example"],
+                        "tags": [],
+                    }
+                )
+                with mock.patch(
+                    "literature_manager.controllers.library_controller.lookup_doi",
+                    return_value={"title": "Single Provider", "source_provider": "Crossref"},
+                ) as lookup_doi_mock:
+                    _detail, payload = controller.lookup_metadata_for_literature(literature_id)
+                lookup_doi_mock.assert_called_once_with(
+                    "10.1000/demo",
+                    preferred_sources=["crossref"],
+                )
+                self.assertEqual(payload["source_provider"], "Crossref")
+
 
 class MetadataProviderParsingTests(unittest.TestCase):
     def test_extract_partial_metadata_from_html_parses_sfx_context(self):

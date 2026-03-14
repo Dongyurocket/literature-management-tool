@@ -620,7 +620,6 @@ class QtMainWindow(QMainWindow):
         self.country_edit = QLineEdit(self)
 
         self.cite_key_edit = QLineEdit(self)
-        self.cite_key_edit.setReadOnly(True)
         self.summary_edit = QTextEdit(self)
         self.summary_edit.setFixedHeight(90)
         self.abstract_edit = QTextEdit(self)
@@ -890,6 +889,7 @@ class QtMainWindow(QMainWindow):
             self.url_edit,
             self.language_edit,
             self.country_edit,
+            self.cite_key_edit,
         ]
         for widget in widgets:
             if isinstance(widget, QComboBox):

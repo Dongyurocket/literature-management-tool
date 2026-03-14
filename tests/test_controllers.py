@@ -47,9 +47,31 @@ class LibraryControllerTests(unittest.TestCase):
                 )
                 self.assertEqual(merged["title"], "Existing Title")
                 self.assertEqual(merged["summary"], "Keep me")
-                self.assertEqual(merged["authors"], ["Alice"])
+                self.assertEqual(merged["authors"], ["Alice", "Bob"])
                 self.assertEqual(merged["tags"], ["core", "new"])
                 self.assertEqual(merged["doi"], "10.1000/example")
+
+    def test_merge_metadata_payload_replaces_placeholder_title_and_merges_keywords(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                merged = controller.merge_metadata_payload(
+                    {
+                        "title": "未命名文献",
+                        "authors": ["佚名"],
+                        "keywords": "机器学习",
+                        "tags": ["core"],
+                    },
+                    {
+                        "title": "真实标题",
+                        "authors": ["张三", "李四"],
+                        "keywords": "机器学习；深度学习",
+                        "tags": ["new"],
+                    },
+                )
+                self.assertEqual(merged["title"], "真实标题")
+                self.assertEqual(merged["authors"], ["张三", "李四"])
+                self.assertEqual(merged["keywords"], "机器学习；深度学习")
+                self.assertEqual(merged["tags"], ["core", "new"])
 
     def test_export_csl_json_updates_recent_export_dir(self):
         with tempfile.TemporaryDirectory() as tmp:

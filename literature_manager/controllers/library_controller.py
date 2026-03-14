@@ -26,6 +26,19 @@ from ..utils import build_csl_entry, build_gbt_reference
 
 
 class LibraryController:
+    _KNOWN_METADATA_SOURCES = {
+        "crossref",
+        "datacite",
+        "openalex",
+        "cnki",
+        "ustc_openurl",
+        "tsinghua_openurl",
+        "openlibrary",
+        "googlebooks",
+    }
+    _TITLE_PLACEHOLDERS = {"未命名文献", "untitled"}
+    _AUTHOR_PLACEHOLDERS = {"佚名", "匿名", "unknown", "unknown author", "n/a"}
+
     def __init__(
         self,
         settings_store: SettingsStore,
@@ -47,7 +60,52 @@ class LibraryController:
         )
 
     def _preferred_metadata_sources(self) -> list[str]:
-        return list(self.settings.metadata_sources or [])
+        normalized = [
+            str(item).strip()
+            for item in (self.settings.metadata_sources or [])
+            if str(item).strip() in self._KNOWN_METADATA_SOURCES
+        ]
+        if not normalized:
+            return []
+        return [normalized[0]]
+
+    @classmethod
+    def _is_effectively_empty(cls, key: str, value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return True
+            lowered = text.lower()
+            if key == "title" and lowered in {item.lower() for item in cls._TITLE_PLACEHOLDERS}:
+                return True
+            if key in {"subject", "reading_status"} and text in {"未分类", "未标注"}:
+                return True
+            return False
+        if isinstance(value, (list, tuple, set)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if not items:
+                return True
+            if key == "authors":
+                return all(item.lower() in cls._AUTHOR_PLACEHOLDERS for item in items)
+            return False
+        return False
+
+    @staticmethod
+    def _split_keywords(value: str) -> list[str]:
+        parts = re.split(r"[;,；，、]+", value)
+        return [part.strip() for part in parts if part.strip()]
+
+    @classmethod
+    def _merge_keywords(cls, current: str, incoming: str) -> str:
+        current_items = cls._split_keywords(current)
+        incoming_items = cls._split_keywords(incoming)
+        merged = list(current_items)
+        for item in incoming_items:
+            if item not in merged:
+                merged.append(item)
+        return "；".join(merged)
 
     @staticmethod
     def _normalize_statistics_labels(stats: dict[str, Any]) -> dict[str, Any]:
@@ -297,17 +355,39 @@ class LibraryController:
         for key, value in incoming.items():
             if key in {"id", "attachments", "notes"}:
                 continue
+            if key == "source_provider" or str(key).startswith("metadata_"):
+                continue
             if key == "authors":
-                if not payload.get("authors"):
-                    payload["authors"] = value
+                incoming_authors = [str(item).strip() for item in (value or []) if str(item).strip()]
+                if not incoming_authors:
+                    continue
+                existing_authors = [str(item).strip() for item in (payload.get("authors") or []) if str(item).strip()]
+                if self._is_effectively_empty("authors", existing_authors):
+                    payload["authors"] = incoming_authors
+                    continue
+                merged_authors = list(existing_authors)
+                for author in incoming_authors:
+                    if author not in merged_authors:
+                        merged_authors.append(author)
+                payload["authors"] = merged_authors
             elif key == "tags":
                 existing = list(payload.get("tags", []))
                 for tag in value or []:
                     if tag not in existing:
                         existing.append(tag)
                 payload["tags"] = existing
-            elif value and not payload.get(key):
-                payload[key] = value
+            elif key == "keywords":
+                incoming_keywords = str(value or "").strip()
+                if not incoming_keywords:
+                    continue
+                current_keywords = str(payload.get("keywords", "") or "").strip()
+                if not current_keywords:
+                    payload["keywords"] = incoming_keywords
+                else:
+                    payload["keywords"] = self._merge_keywords(current_keywords, incoming_keywords)
+            elif not self._is_effectively_empty(key, value):
+                if self._is_effectively_empty(key, payload.get(key)):
+                    payload[key] = value
         return payload
 
     def apply_metadata_payload(self, literature_id: int, incoming: dict[str, Any]) -> dict[str, Any] | None:

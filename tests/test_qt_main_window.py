@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from literature_manager.config import AppSettings, SettingsStore
 from literature_manager.controllers import LibraryController
+from literature_manager.views.dialogs.settings_dialog import SettingsDialog
 from literature_manager.viewmodels import MainWindowViewModel
 from literature_manager.views.main_window import QtMainWindow
 
@@ -163,6 +164,41 @@ class QtMainWindowAsyncTests(unittest.TestCase):
                         for title, message, level in toasts
                     )
                 )
+
+
+class QtMainWindowMetadataTests(unittest.TestCase):
+    def test_cite_key_can_be_edited_and_saved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                literature_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "引用键测试",
+                        "authors": ["张三"],
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
+                window._show_detail(literature_id)
+                self.assertFalse(window.cite_key_edit.isReadOnly())
+                window.cite_key_edit.setText("ManualKey2026")
+                window._save_metadata_changes()
+                detail = window.viewmodel.controller.get_literature(literature_id)
+                self.assertEqual(detail.get("cite_key"), "ManualKey2026")
+
+
+class SettingsDialogMetadataSourceTests(unittest.TestCase):
+    def test_metadata_source_is_single_select(self):
+        dialog = SettingsDialog(
+            AppSettings(metadata_sources=["openalex", "cnki"]),
+            parent=None,
+        )
+        self.assertTrue(dialog.metadata_source_checks["openalex"].isChecked())
+        self.assertFalse(dialog.metadata_source_checks["cnki"].isChecked())
+        dialog.metadata_source_checks["cnki"].setChecked(True)
+        self.assertFalse(dialog.metadata_source_checks["openalex"].isChecked())
+        self.assertEqual(dialog.value().metadata_sources, ["cnki"])
+        dialog.close()
 
 
 if __name__ == "__main__":
