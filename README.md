@@ -1,6 +1,6 @@
-﻿# 文献管理软件
+# Literature management tool
 
-一个离线优先的本地文献管理桌面应用，使用 `tkinter + sqlite3 + pypdf` 编写，适合在 Windows 上管理 PDF、翻译稿、笔记、BibTeX 与全文检索。
+A local-first desktop application for managing literature, PDFs, notes, BibTeX, and full-text search, built with `tkinter + sqlite3 + pypdf`.
 
 ## 已实现的 V2 功能
 
@@ -27,7 +27,7 @@ python main.py
 
 首次运行后，程序会在以下目录保存配置和数据库：
 
-- 默认：`%APPDATA%\LiteratureManager`
+- ???`%APPDATA%\Literature management tool`
 - 可选：设置环境变量 `LITERATURE_MANAGER_HOME` 指向自定义目录
 
 ## 使用建议

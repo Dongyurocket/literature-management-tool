@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-APP_NAME = "LiteratureManager"
+APP_NAME = "Literature management tool"
 ENV_HOME = "LITERATURE_MANAGER_HOME"
 
 

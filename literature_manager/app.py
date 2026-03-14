@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
@@ -18,7 +18,7 @@ def main() -> None:
     style = ttk.Style(root)
     if "vista" in style.theme_names():
         style.theme_use("vista")
-    root.title("文献管理软件")
+    root.title("Literature management tool")
     root.geometry("1500x900")
 
     window = MainWindow(root, database, settings_store, settings)

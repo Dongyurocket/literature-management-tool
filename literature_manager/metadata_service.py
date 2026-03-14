@@ -12,7 +12,7 @@ from .utils import detect_note_format, extract_year, normalize_for_compare, sani
 CROSSREF_BASE = "https://api.crossref.org/works/"
 OPENLIBRARY_BOOKS = "https://openlibrary.org/api/books"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManager/0.2 (local desktop app)",
+    "User-Agent": "LiteratureManagementTool/0.2 (local desktop app)",
     "Accept": "application/json",
 }
 

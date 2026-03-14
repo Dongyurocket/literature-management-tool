@@ -1,18 +1,18 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "literature-manager"
+name = "literature-management-tool"
 version = "0.2.0"
-description = "离线优先的本地文献管理软件"
+description = "Literature management tool for local-first reference management"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "OpenCode" }]
 dependencies = ["pypdf>=4.0"]
 
 [project.scripts]
-literature-manager = "literature_manager.app:main"
+literature-management-tool = "literature_manager.app:main"
 
 [tool.setuptools]
 packages = ["literature_manager"]
