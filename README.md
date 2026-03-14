@@ -1,54 +1,51 @@
-# Literature management tool
+﻿# Literature management tool
 
 A local-first desktop application for managing literature, PDFs, notes, BibTeX, and full-text search, built with `tkinter + sqlite3 + pypdf`.
 
-## 已实现的 V2 功能
+## Features
 
-- 自定义文献库目录，可选择复制、移动或仅关联外部文件
-- 文献条目支持 GB/T 7714-2015 常见字段，并扩展主题、关键词、一句话简介、摘要、备注、阅读状态、评分、标签
-- 一条文献可关联多个附件：原文、翻译、笔记文件、补充材料
-- 文本笔记与文件笔记并存：支持 `docx`、`md`、`txt` 外部笔记，且一个笔记可关联多个附件
-- 支持为 PDF 配置自定义阅读器软件，打开 PDF 时优先使用该程序
-- 支持多选文献导出 `.bib`
-- 支持复制 GB/T 参考文献文本、导出 CSL JSON
-- 支持按 `作者_年份_标题_原文/翻译` 对 PDF 批量重命名
-- 支持 DOI / ISBN 自动补全元数据
-- 支持导入 `.bib` / `.ris` 文件以及批量扫描 PDF、笔记文件进行导入
-- 支持重复文献检测与合并
-- 支持全文检索：标题、摘要、文本笔记、`docx`、PDF 抽取文本
-- 支持维护工具：缺失文件检测、路径修复、搜索索引重建、备份与恢复
-- 支持统计面板：按年份、主题、阅读状态统计
+- Local-first library management with a custom storage folder
+- GB/T 7714-2015 metadata fields plus subject, keywords, summary, abstract, rating, tags, and reading status
+- Multiple attachments per literature record, including source PDFs, translations, note files, and supplements
+- Text notes and external note files (`docx`, `md`, `txt`) with multi-attachment linking
+- Custom PDF reader integration
+- BibTeX export, CSL JSON export, and GB/T reference text copy
+- DOI / ISBN metadata lookup
+- Batch import for `pdf`, `bib`, `ris`, `docx`, `md`, and `txt`
+- Duplicate detection and merge
+- Full-text search across metadata, notes, docx files, and extracted PDF text
+- Maintenance tools for missing path checks, repair, backup, restore, and index rebuild
+- Statistics dashboard by year, subject, and reading status
 
-## 运行方式
+## Run From Source
 
 ```bash
 python main.py
 ```
 
-首次运行后，程序会在以下目录保存配置和数据库：
+Application data is stored in:
 
-- ???`%APPDATA%\Literature management tool`
-- 可选：设置环境变量 `LITERATURE_MANAGER_HOME` 指向自定义目录
+- Default: `%APPDATA%\\Literature management tool`
+- Optional override: set `LITERATURE_MANAGER_HOME`
 
-## 使用建议
+## Build Windows Executable
 
-1. 先在“设置”里指定文献库目录。
-2. 新建文献，补充作者、年份、来源、主题、关键词等信息。
-3. 对已有文献，可使用“元数据补全”根据 DOI / ISBN 自动填充缺失字段。
-4. 使用“导入中心”批量扫描 PDF、Bib、RIS 或笔记文件。
-5. 选中文献后通过“添加附件”导入 PDF、翻译稿或补充材料。
-6. 在右侧“笔记”页签中可创建文本笔记，或关联现有 `docx/md/txt` 笔记文件，并绑定相关附件。
-7. 使用“查重”合并重复记录，使用“全文搜索”检索摘要、笔记与 PDF 文本。
-8. 使用“维护”进行路径修复、索引重建、备份恢复，使用“统计”查看概览。
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
 
-## 备份说明
+The build script creates:
 
-- 备份会打包数据库、设置文件，以及当前文献库目录中的文件（若已设置）
-- 恢复时会恢复数据库与设置；文献文件会解压到应用数据目录下的 `restored_library`
+- `dist\Literature management tool\` - unpacked Windows app folder
+- `dist\Literature-management-tool-vX.Y.Z-windows-x64.zip` - release-ready archive
 
-## 后续可扩展方向
+## Release Workflow
 
-- DOI 批量刷新与失败重试队列
-- 更强的 PDF 元数据抽取与 OCR
-- 更细粒度的冲突合并界面
-- 打包为 Windows 可执行文件
+1. Build with `scripts/build_windows.ps1`
+2. Create a git tag such as `v0.2.1`
+3. Upload the generated zip to a GitHub Release
+
+## Backup Notes
+
+- Backup archives include the database, settings, and library files when a library folder is configured
+- Restore extracts files to the application data directory under `restored_library`
