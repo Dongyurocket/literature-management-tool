@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -20,7 +23,43 @@ jobs:
       - name: Install Inno Setup
         shell: powershell
         run: |
+          function Resolve-IsccPath {
+            $candidates = @(
+              $env:ISCC_PATH,
+              (Join-Path $env:LOCALAPPDATA "Programs\\Inno Setup 6\\ISCC.exe"),
+              "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe",
+              "C:\\Program Files\\Inno Setup 6\\ISCC.exe"
+            ) | Where-Object { $_ }
+
+            foreach ($candidate in $candidates) {
+              if (Test-Path $candidate) {
+                return (Resolve-Path $candidate).Path
+              }
+            }
+
+            $command = Get-Command iscc -ErrorAction SilentlyContinue
+            if ($command) {
+              return $command.Source
+            }
+
+            return $null
+          }
+
+          $iscc = Resolve-IsccPath
+          if ($iscc) {
+            Write-Host "Inno Setup already available at $iscc"
+            exit 0
+          }
+
           winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) {
+            $iscc = Resolve-IsccPath
+            if ($iscc) {
+              Write-Host "winget returned exit code $LASTEXITCODE, but Inno Setup is available at $iscc"
+              exit 0
+            }
+            throw "Failed to install Inno Setup with winget (exit code $LASTEXITCODE)."
+          }
       - name: Build executable
         shell: powershell
         run: .\scripts\build_windows.ps1 -Version $env:GITHUB_REF_NAME.TrimStart("v")
