@@ -12,8 +12,8 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -64,6 +64,22 @@ jobs:
         shell: powershell
         run: .\scripts\build_windows.ps1 -Version $env:GITHUB_REF_NAME.TrimStart("v")
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/Literature-management-tool-*-Setup.exe
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $asset = Get-ChildItem -Path dist -Filter "Literature-management-tool-*-Setup.exe" |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $asset) {
+            throw "Release asset not found in dist."
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --clobber
+            exit 0
+          }
+
+          gh release create $tag $asset --verify-tag
