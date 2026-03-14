@@ -8,9 +8,10 @@
 一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + PySide6 + sqlite3 + pypdf` 构建，现已完成 Qt 桌面版迁移，默认本地存储，不依赖服务器即可运行。
 
 仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
-最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)
+最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
+安装版下载：[Setup.exe](https://github.com/Dongyurocket/literature-management-tool/releases/download/v0.2.3/Literature-management-tool-v0.2.3-Setup.exe)
 
-![Project cover](docs/social-preview.png)
+![GitHub 首页预览](docs/screenshots/github-home-v023.png)
 
 说明：README 与 Release 中使用的界面截图已对本地路径等隐私地址做打码处理。
 
@@ -24,6 +25,17 @@
 - 支持惰性加载表格、大数据量滚动、更清晰的导航区和工具入口
 - Windows 打包链路已验证，继续提供带安装向导的 `Setup.exe`
 
+## 核心能力速览
+
+| 模块 | 当前支持 |
+| --- | --- |
+| 元数据 | GB/T 7714 常用字段、主题、关键词、一句话简介、摘要、备注、阅读状态、评分、引用键 |
+| 文件管理 | 自定义文献库目录，支持 `copy / move / link` 三种导入方式，原文 / 译文 / 补充材料多附件关联 |
+| 笔记系统 | 内置文本笔记，外部 `docx / md / txt` 笔记，支持预览与全文检索 |
+| 批量工具 | BibTeX、CSL JSON、GB/T 文本导出，PDF 批量重命名预览与执行 |
+| 维护能力 | 查重合并、缺失路径修复、备份恢复、索引重建、统计面板 |
+| 桌面体验 | PySide6 / Qt、惰性表格加载、拖拽导入、后台任务、非阻塞 toast 提示 |
+
 ## 为什么做这个工具
 
 很多轻量文献工具只能保存标题和 PDF，难以覆盖国内常用的 GB/T 7714-2015 参考文献整理需求，也不方便把原文、翻译稿、阅读笔记、导出文件统一管理。本项目重点解决以下问题：
@@ -34,7 +46,17 @@
 - 笔记既想支持内置文本，也想关联 `docx / md / txt` 外部文件
 - 本地移动文件后路径失效，缺少修复、查重、备份和恢复能力
 
-## 首页预览
+## 适合谁使用
+
+- 需要本地优先管理 PDF、翻译稿、补充材料和笔记的研究生、教师、工程师
+- 需要维护 GB/T 7714-2015 字段，同时还要导出 BibTeX 或 CSL JSON 的用户
+- 希望把文献条目、附件、笔记、导出文件集中到一个 Windows 桌面工具里的个人或小团队
+
+## 界面预览
+
+### GitHub / Release 总览图
+
+![版本总览图](docs/screenshots/release-v023-overview.png)
 
 ### 主界面
 
@@ -285,6 +307,18 @@ python main.py
 - 更容易继续扩展 GUI，而不是把所有逻辑塞进单个界面文件
 - 更适合后续补自动化测试
 - 更利于把长耗时任务切到后台线程执行
+
+如果你想继续迭代界面展示素材，可直接运行：
+
+```bash
+python .\scripts\render_github_assets.py
+```
+
+它会重新生成以下 GitHub 展示图片：
+
+- `docs/social-preview.png`
+- `docs/screenshots/github-home-v023.png`
+- `docs/screenshots/release-v023-overview.png`
 
 ## 目录结构
 
