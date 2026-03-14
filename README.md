@@ -11,10 +11,6 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：[Setup.exe](https://github.com/Dongyurocket/literature-management-tool/releases/download/v0.2.3/Literature-management-tool-v0.2.3-Setup.exe)
 
-![GitHub 首页预览](docs/screenshots/github-home-v023.png)
-
-说明：README 与 Release 中使用的界面截图已对本地路径等隐私地址做打码处理。
-
 ## V0.2.3 / Phase 4 更新
 
 这一版是一次完整的 Qt 桌面化升级，重点不是简单换皮，而是把旧功能完整迁到新的界面架构，并补齐后台任务与安装发布链路。
@@ -51,24 +47,6 @@
 - 需要本地优先管理 PDF、翻译稿、补充材料和笔记的研究生、教师、工程师
 - 需要维护 GB/T 7714-2015 字段，同时还要导出 BibTeX 或 CSL JSON 的用户
 - 希望把文献条目、附件、笔记、导出文件集中到一个 Windows 桌面工具里的个人或小团队
-
-## 界面预览
-
-### GitHub / Release 总览图
-
-![版本总览图](docs/screenshots/release-v023-overview.png)
-
-### 主界面
-
-![主界面截图](docs/screenshots/main-overview.png)
-
-### 文献信息编辑
-
-![文献信息截图](docs/screenshots/literature-editor.png)
-
-### 设置与阅读器配置
-
-![设置截图](docs/screenshots/settings-dialog.png)
 
 ## 功能总览
 
@@ -308,18 +286,6 @@ python main.py
 - 更适合后续补自动化测试
 - 更利于把长耗时任务切到后台线程执行
 
-如果你想继续迭代界面展示素材，可直接运行：
-
-```bash
-python .\scripts\render_github_assets.py
-```
-
-它会重新生成以下 GitHub 展示图片：
-
-- `docs/social-preview.png`
-- `docs/screenshots/github-home-v023.png`
-- `docs/screenshots/release-v023-overview.png`
-
 ## 目录结构
 
 ```text
@@ -345,7 +311,6 @@ literature-management-tool/
 |  |- build_windows.ps1
 |- tests/
 |- docs/
-|  |- screenshots/
 |  |- releases/
 |- .github/workflows/
 |  |- build-windows-release.yml
