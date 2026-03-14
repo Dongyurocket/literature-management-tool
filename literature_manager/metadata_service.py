@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import json
 import re
+import ssl
 from pathlib import Path
 from urllib import error, parse, request
 
@@ -18,25 +20,222 @@ OPENLIBRARY_BOOKS = "https://openlibrary.org/api/books"
 OPENALEX_WORKS = "https://api.openalex.org/works?per-page=1&filter={query}"
 OPENALEX_SEARCH = "https://api.openalex.org/works?per-page=1&search={query}"
 GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}&maxResults=1"
+USTC_OPENURL = "http://sfx.lib.ustc.edu.cn:3210/sfxlcl3/"
+TSINGHUA_OPENURL = (
+    "https://tsinghua-primo.hosted.exlibrisgroup.com/primo-explore/openurl"
+    "?institution=86THU&vid=86THU"
+)
+CNKI_SEARCH = "https://kns.cnki.net/kns8s/defaultresult/index?{query}"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.0",
+    "User-Agent": "LiteratureManagementTool/0.3.1",
     "Accept": "application/json",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+HTML_HEADERS = {
+    **HTTP_HEADERS,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+CNKI_HEADERS = {
+    **HTML_HEADERS,
+    "Referer": "https://www.cnki.net/",
 }
 
 
+def _decode_response_text(body: bytes, charset: str | None = None) -> str:
+    candidates = [charset, "utf-8", "gb18030", "big5"]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return body.decode(candidate)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return body.decode("utf-8", errors="ignore")
+
+
+def _get_text(url: str, headers: dict[str, str] | None = None) -> str:
+    request_headers = headers or HTTP_HEADERS
+    attempts: list[ssl.SSLContext | None] = [None]
+    if url.lower().startswith("https://"):
+        attempts.append(ssl._create_unverified_context())
+
+    last_error: Exception | None = None
+    for context in attempts:
+        try:
+            req = request.Request(url, headers=request_headers)
+            with request.urlopen(req, timeout=15, context=context) as response:
+                return _decode_response_text(
+                    response.read(),
+                    response.headers.get_content_charset(),
+                )
+        except error.HTTPError as exc:
+            message = _decode_response_text(
+                exc.read(),
+                exc.headers.get_content_charset() if exc.headers else None,
+            ).strip()
+            detail = f"HTTP {exc.code}"
+            if message:
+                detail = f"{detail}: {message[:120]}"
+            raise ValueError(detail) from exc
+        except error.URLError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise ValueError(str(last_error.reason))
+    raise ValueError("网络请求失败。")
+
+
 def _get_json(url: str) -> dict:
-    req = request.Request(url, headers=HTTP_HEADERS)
-    with request.urlopen(req, timeout=15) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return json.loads(_get_text(url, headers=HTTP_HEADERS))
 
 
 def _safe_get_json(url: str) -> dict:
     try:
         return _get_json(url)
-    except error.HTTPError as exc:
-        raise ValueError(f"HTTP {exc.code}") from exc
-    except error.URLError as exc:
-        raise ValueError(str(exc.reason)) from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("返回内容不是有效 JSON") from exc
+
+
+def _safe_get_text(url: str, headers: dict[str, str] | None = None) -> str:
+    return _get_text(url, headers=headers or HTML_HEADERS)
+
+
+def _clean_html_text(value: str) -> str:
+    text = html.unescape(value or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _parse_html_attributes(fragment: str) -> dict[str, str]:
+    attributes: dict[str, str] = {}
+    for key, raw_value in re.findall(r'([:\w-]+)\s*=\s*(".*?"|\'.*?\'|[^\s>]+)', fragment, re.S):
+        value = raw_value.strip().strip('"').strip("'")
+        attributes[key.lower()] = html.unescape(value)
+    return attributes
+
+
+def _collect_meta_tags(document: str) -> dict[str, list[str]]:
+    tags: dict[str, list[str]] = {}
+    for fragment in re.findall(r"<meta\b([^>]+)>", document or "", flags=re.I):
+        attributes = _parse_html_attributes(fragment)
+        key = (
+            attributes.get("name")
+            or attributes.get("property")
+            or attributes.get("itemprop")
+            or attributes.get("http-equiv")
+        )
+        content = attributes.get("content")
+        if not key or content is None:
+            continue
+        normalized_key = key.strip().lower()
+        tags.setdefault(normalized_key, []).append(_clean_html_text(content))
+    return tags
+
+
+def _meta_values(meta_tags: dict[str, list[str]], *names: str) -> list[str]:
+    values: list[str] = []
+    for name in names:
+        values.extend(item for item in meta_tags.get(name.lower(), []) if item)
+    return values
+
+
+def _first_non_empty(values: list[str]) -> str:
+    for value in values:
+        if value:
+            return value
+    return ""
+
+
+def _normalize_doi_value(value: str) -> str:
+    normalized = (value or "").strip()
+    normalized = normalized.replace("https://doi.org/", "").replace("http://doi.org/", "")
+    return normalized.strip()
+
+
+def _normalize_isbn_value(value: str) -> str:
+    return re.sub(r"[^0-9Xx]", "", value or "")
+
+
+def _normalize_author_list(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    authors: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values or []:
+        for item in re.split(r"[;\n]|(?:\s+and\s+)", raw_value or "", flags=re.I):
+            candidate = item.strip().strip(",")
+            if not candidate:
+                continue
+            key = normalize_for_compare(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            authors.append(candidate)
+    return authors
+
+
+def _join_pages(first_page: str, last_page: str) -> str:
+    first = (first_page or "").strip()
+    last = (last_page or "").strip()
+    if first and last:
+        return f"{first}-{last}"
+    return first or last
+
+
+def _split_keywords(values: list[str]) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        for item in re.split(r"[;,，；]", raw_value or ""):
+            candidate = item.strip()
+            if not candidate:
+                continue
+            key = normalize_for_compare(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            parts.append(candidate)
+    return ", ".join(parts)
+
+
+def _merge_partial_payload(target: dict, source: dict) -> dict:
+    merged = dict(target)
+    for key, value in source.items():
+        if value in ("", None, []):
+            continue
+        if key == "authors":
+            existing = _normalize_author_list(merged.get("authors", []))
+            incoming = _normalize_author_list(value)
+            if len(incoming) > len(existing):
+                merged["authors"] = incoming
+            elif incoming and not existing:
+                merged["authors"] = incoming
+        elif key == "keywords":
+            merged[key] = value if len(str(value)) > len(str(merged.get(key, ""))) else merged.get(key, "")
+        elif key in {"abstract", "summary"}:
+            merged[key] = value if len(str(value)) > len(str(merged.get(key, ""))) else merged.get(key, "")
+        elif key == "entry_type":
+            merged.setdefault(key, value)
+        else:
+            merged[key] = value if not merged.get(key) else merged.get(key)
+    return merged
+
+
+def _map_work_hint(item_type: str) -> str:
+    normalized = (item_type or "").strip().lower()
+    mapping = {
+        "journalarticle": "journal_article",
+        "article": "journal_article",
+        "scholarlyarticle": "journal_article",
+        "book": "book",
+        "bookchapter": "book",
+        "thesis": "thesis",
+        "dissertation": "thesis",
+        "conferencepaper": "conference_paper",
+        "conferenceproceedings": "conference_paper",
+        "report": "report",
+    }
+    return mapping.get(normalized, "")
 
 
 def _authors_from_crossref(message: dict) -> list[str]:
@@ -82,6 +281,417 @@ def _map_crossref_type(item_type: str) -> str:
     }
     return mapping.get(item_type, "misc")
 
+
+def _authors_from_json_ld(value) -> list[str]:
+    if isinstance(value, list):
+        authors: list[str] = []
+        for item in value:
+            authors.extend(_authors_from_json_ld(item))
+        return _normalize_author_list(authors)
+    if isinstance(value, dict):
+        if value.get("name"):
+            return _normalize_author_list([str(value["name"])])
+        given = str(value.get("givenName", "")).strip()
+        family = str(value.get("familyName", "")).strip()
+        full_name = " ".join(part for part in [given, family] if part).strip()
+        return _normalize_author_list([full_name]) if full_name else []
+    if isinstance(value, str):
+        return _normalize_author_list([value])
+    return []
+
+
+def _flatten_json_ld_objects(value) -> list[dict]:
+    objects: list[dict] = []
+    if isinstance(value, dict):
+        objects.append(value)
+        graph = value.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                objects.extend(_flatten_json_ld_objects(item))
+    elif isinstance(value, list):
+        for item in value:
+            objects.extend(_flatten_json_ld_objects(item))
+    return [item for item in objects if isinstance(item, dict)]
+
+
+def _payload_from_meta_tags(meta_tags: dict[str, list[str]], fallback_url: str, source_provider: str) -> dict:
+    authors = _normalize_author_list(
+        _meta_values(
+            meta_tags,
+            "citation_author",
+            "dc.creator",
+            "dcterms.creator",
+            "author",
+        )
+    )
+    publication_title = _first_non_empty(
+        _meta_values(
+            meta_tags,
+            "citation_journal_title",
+            "citation_conference_title",
+            "citation_book_title",
+            "prism.publicationname",
+            "dc.source",
+            "dcterms.ispartof",
+        )
+    )
+    abstract = _first_non_empty(
+        _meta_values(
+            meta_tags,
+            "citation_abstract",
+            "description",
+            "dc.description",
+            "dcterms.abstract",
+            "og:description",
+        )
+    )
+    doi = _normalize_doi_value(
+        _first_non_empty(
+            _meta_values(
+                meta_tags,
+                "citation_doi",
+                "dc.identifier",
+                "dcterms.identifier",
+                "prism.doi",
+            )
+        )
+    )
+    url = _first_non_empty(
+        _meta_values(
+            meta_tags,
+            "citation_abstract_html_url",
+            "citation_fulltext_html_url",
+            "citation_public_url",
+            "og:url",
+        )
+    ) or fallback_url
+    entry_type = ""
+    if _meta_values(meta_tags, "citation_book_title"):
+        entry_type = "book"
+    elif _meta_values(meta_tags, "citation_conference_title"):
+        entry_type = "conference_paper"
+    elif _meta_values(meta_tags, "citation_journal_title", "prism.publicationname"):
+        entry_type = "journal_article"
+    return {
+        "entry_type": entry_type,
+        "title": _first_non_empty(
+            _meta_values(
+                meta_tags,
+                "citation_title",
+                "dc.title",
+                "dcterms.title",
+                "og:title",
+                "title",
+            )
+        ),
+        "publication_title": publication_title,
+        "publisher": _first_non_empty(_meta_values(meta_tags, "citation_publisher", "dc.publisher")),
+        "conference_name": _first_non_empty(_meta_values(meta_tags, "citation_conference_title")),
+        "year": extract_year(
+            _first_non_empty(
+                _meta_values(
+                    meta_tags,
+                    "citation_publication_date",
+                    "citation_date",
+                    "dc.date",
+                    "dcterms.issued",
+                    "prism.publicationdate",
+                )
+            )
+        ),
+        "volume": _first_non_empty(_meta_values(meta_tags, "citation_volume", "prism.volume")),
+        "issue": _first_non_empty(_meta_values(meta_tags, "citation_issue", "prism.number")),
+        "pages": _join_pages(
+            _first_non_empty(_meta_values(meta_tags, "citation_firstpage")),
+            _first_non_empty(_meta_values(meta_tags, "citation_lastpage")),
+        )
+        or _first_non_empty(_meta_values(meta_tags, "citation_pages")),
+        "doi": doi,
+        "isbn": _normalize_isbn_value(_first_non_empty(_meta_values(meta_tags, "citation_isbn", "isbn"))),
+        "url": url,
+        "language": _first_non_empty(_meta_values(meta_tags, "citation_language", "dc.language")),
+        "keywords": _split_keywords(_meta_values(meta_tags, "citation_keywords", "keywords", "dc.subject")),
+        "abstract": abstract,
+        "summary": abstract[:240],
+        "authors": authors,
+        "source_provider": source_provider,
+    }
+
+
+def _payload_from_json_ld(document: str, fallback_url: str, source_provider: str) -> dict:
+    scripts = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        document or "",
+        flags=re.I | re.S,
+    )
+    best: dict = {}
+    for script in scripts:
+        cleaned = script.strip()
+        if not cleaned:
+            continue
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            continue
+        for obj in _flatten_json_ld_objects(data):
+            type_hint = str(obj.get("@type", "")).replace(" ", "")
+            payload = {
+                "entry_type": _map_work_hint(type_hint),
+                "title": _clean_html_text(str(obj.get("name") or obj.get("headline") or "")),
+                "publication_title": "",
+                "publisher": "",
+                "year": extract_year(str(obj.get("datePublished") or obj.get("dateCreated") or "")),
+                "doi": "",
+                "isbn": "",
+                "url": str(obj.get("url") or obj.get("@id") or fallback_url),
+                "language": str(obj.get("inLanguage") or ""),
+                "keywords": "",
+                "abstract": _clean_html_text(str(obj.get("description") or obj.get("abstract") or "")),
+                "summary": "",
+                "authors": _authors_from_json_ld(obj.get("author")),
+                "source_provider": source_provider,
+            }
+            if isinstance(obj.get("identifier"), list):
+                identifiers = [str(item.get("value") if isinstance(item, dict) else item) for item in obj["identifier"]]
+            else:
+                raw_identifier = obj.get("identifier")
+                identifiers = [str(raw_identifier)] if raw_identifier else []
+            if not payload["doi"]:
+                doi_match = next(
+                    (
+                        _normalize_doi_value(identifier)
+                        for identifier in identifiers
+                        if "10." in identifier or "doi" in identifier.lower()
+                    ),
+                    "",
+                )
+                payload["doi"] = doi_match
+            if isinstance(obj.get("isPartOf"), dict):
+                payload["publication_title"] = _clean_html_text(str(obj["isPartOf"].get("name") or ""))
+            publisher = obj.get("publisher")
+            if isinstance(publisher, dict):
+                payload["publisher"] = _clean_html_text(str(publisher.get("name") or ""))
+            keywords = obj.get("keywords")
+            if isinstance(keywords, list):
+                payload["keywords"] = _split_keywords([str(item) for item in keywords])
+            elif isinstance(keywords, str):
+                payload["keywords"] = _split_keywords([keywords])
+            if payload["abstract"]:
+                payload["summary"] = payload["abstract"][:240]
+            best = _merge_partial_payload(best, payload)
+    return best
+
+
+def _sfx_scalar(document: str, key: str) -> str:
+    match = re.search(rf"\|{re.escape(key)}\|\s*=>\s*\|(.*?)\|", document or "", flags=re.S)
+    return _clean_html_text(match.group(1)) if match else ""
+
+
+def _sfx_list(document: str, key: str) -> list[str]:
+    match = re.search(rf"\|{re.escape(key)}\|\s*=>\s*\[(.*?)\]", document or "", flags=re.S)
+    if not match:
+        return []
+    return _normalize_author_list(re.findall(r"\|(.*?)\|", match.group(1), flags=re.S))
+
+
+def _payload_from_sfx_context(document: str, fallback_url: str, source_provider: str) -> dict:
+    context_match = re.search(r"<ctx_object_1>(.*?)</ctx_object_1>", document or "", flags=re.S)
+    if not context_match:
+        return {}
+    context = context_match.group(1)
+    title = _sfx_scalar(context, "rft.atitle") or _sfx_scalar(context, "rft.btitle") or _sfx_scalar(context, "rft.title")
+    publication_title = _sfx_scalar(context, "rft.jtitle")
+    genre = _sfx_scalar(context, "rft.genre")
+    pages = _join_pages(_sfx_scalar(context, "rft.spage"), _sfx_scalar(context, "rft.epage")) or _sfx_scalar(context, "rft.pages")
+    doi = _normalize_doi_value(_sfx_scalar(context, "rft.doi"))
+    isbn = _normalize_isbn_value(_sfx_scalar(context, "rft.isbn"))
+    abstract = _sfx_scalar(context, "rft.description")
+    return {
+        "entry_type": _map_work_hint(genre),
+        "title": title,
+        "publication_title": publication_title,
+        "publisher": _sfx_scalar(context, "rft.pub"),
+        "conference_name": _sfx_scalar(context, "rft.conf_name"),
+        "year": extract_year(_sfx_scalar(context, "rft.date") or _sfx_scalar(context, "rft.year")),
+        "volume": _sfx_scalar(context, "rft.volume"),
+        "issue": _sfx_scalar(context, "rft.issue"),
+        "pages": pages,
+        "doi": doi,
+        "isbn": isbn,
+        "url": fallback_url,
+        "keywords": _sfx_scalar(context, "rft.subject"),
+        "abstract": abstract,
+        "summary": abstract[:240],
+        "authors": _sfx_list(context, "@rft.au"),
+        "source_provider": source_provider,
+    }
+
+
+def extract_partial_metadata_from_html(document: str, fallback_url: str, source_provider: str) -> dict:
+    payload: dict = {}
+    meta_tags = _collect_meta_tags(document)
+    payload = _merge_partial_payload(payload, _payload_from_meta_tags(meta_tags, fallback_url, source_provider))
+    payload = _merge_partial_payload(payload, _payload_from_json_ld(document, fallback_url, source_provider))
+    payload = _merge_partial_payload(payload, _payload_from_sfx_context(document, fallback_url, source_provider))
+    if not payload.get("title"):
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", document or "", flags=re.I | re.S)
+        title_text = _clean_html_text(title_match.group(1)) if title_match else ""
+        if title_text:
+            payload["title"] = title_text
+    if payload.get("abstract") and not payload.get("summary"):
+        payload["summary"] = str(payload["abstract"])[:240]
+    if payload:
+        payload["source_provider"] = source_provider
+        payload.setdefault("url", fallback_url)
+    return payload
+
+
+def _openurl_format_and_genre(entry_type: str | None = None, *, has_isbn: bool = False) -> tuple[str, str]:
+    normalized = (entry_type or "").strip().lower()
+    if has_isbn or normalized in {"book", "thesis"}:
+        return "info:ofi/fmt:kev:mtx:book", "book"
+    if normalized == "conference_paper":
+        return "info:ofi/fmt:kev:mtx:journal", "conference"
+    return "info:ofi/fmt:kev:mtx:journal", "article"
+
+
+def _build_openurl_query(
+    *,
+    title: str = "",
+    authors: list[str] | None = None,
+    year: int | None = None,
+    doi: str = "",
+    isbn: str = "",
+    entry_type: str | None = None,
+) -> dict[str, str]:
+    fmt, genre = _openurl_format_and_genre(entry_type, has_isbn=bool(isbn))
+    query = {
+        "url_ver": "Z39.88-2004",
+        "ctx_ver": "Z39.88-2004",
+        "rft_val_fmt": fmt,
+        "genre": genre,
+    }
+    if doi:
+        query["rft_id"] = f"info:doi/{doi}"
+        query["rft.doi"] = doi
+    if isbn:
+        query["rft_id"] = f"urn:isbn:{isbn}"
+        query["rft.isbn"] = isbn
+    if title:
+        if genre == "book":
+            query["rft.btitle"] = title
+        else:
+            query["rft.atitle"] = title
+            query["rft.title"] = title
+    if authors:
+        query["rft.au"] = authors[0]
+    if year:
+        query["rft.date"] = str(year)
+    return query
+
+
+def _build_url_with_query(base_url: str, query: dict[str, str]) -> str:
+    parts = parse.urlsplit(base_url)
+    existing = dict(parse.parse_qsl(parts.query, keep_blank_values=True))
+    existing.update({key: value for key, value in query.items() if value})
+    path = parts.path or "/"
+    return parse.urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            path,
+            parse.urlencode(existing, doseq=True),
+            parts.fragment,
+        )
+    )
+
+
+def _payload_has_useful_metadata(
+    payload: dict,
+    *,
+    title: str = "",
+    authors: list[str] | None = None,
+    year: int | None = None,
+    doi: str = "",
+    isbn: str = "",
+    lookup_url: str = "",
+    provider_base_url: str = "",
+) -> bool:
+    if any(
+        payload.get(key)
+        for key in [
+            "publication_title",
+            "publisher",
+            "conference_name",
+            "volume",
+            "issue",
+            "pages",
+            "keywords",
+            "abstract",
+            "summary",
+            "language",
+        ]
+    ):
+        return True
+
+    resolved_url = str(payload.get("url", "") or "")
+    if resolved_url and resolved_url not in {lookup_url, provider_base_url} and not resolved_url.startswith(provider_base_url):
+        return True
+
+    if payload.get("title") and normalize_for_compare(str(payload["title"])) != normalize_for_compare(title):
+        return True
+    if payload.get("year") and payload.get("year") != year:
+        return True
+    if payload.get("doi") and _normalize_doi_value(str(payload["doi"])) != _normalize_doi_value(doi):
+        return True
+    if payload.get("isbn") and _normalize_isbn_value(str(payload["isbn"])) != _normalize_isbn_value(isbn):
+        return True
+
+    incoming_authors = [normalize_for_compare(item) for item in _normalize_author_list(payload.get("authors", []))]
+    existing_authors = [normalize_for_compare(item) for item in _normalize_author_list(authors or [])]
+    return bool(incoming_authors and incoming_authors != existing_authors)
+
+
+def _score_title_candidate(candidate: dict, title: str, authors: list[str], year: int | None) -> int:
+    score = 0
+    title_key = normalize_for_compare(title)
+    candidate_title_key = normalize_for_compare(str(candidate.get("title", "")))
+    if candidate_title_key == title_key and candidate_title_key:
+        score += 100
+    elif title_key and candidate_title_key and (title_key in candidate_title_key or candidate_title_key in title_key):
+        score += 60
+    if year and extract_year(str(candidate.get("year", ""))) == year:
+        score += 15
+    candidate_authors = normalize_for_compare(" ".join(candidate.get("authors", [])))
+    for author in authors:
+        author_key = normalize_for_compare(author)
+        if author_key and author_key in candidate_authors:
+            score += 10
+            break
+    return score
+
+
+def _extract_cnki_search_candidates(document: str, search_url: str) -> list[dict]:
+    candidates: list[dict] = []
+    pattern = re.compile(
+        r'<a\b([^>]*class=["\'][^"\']*\bfz14\b[^"\']*["\'][^>]*)>(.*?)</a>',
+        flags=re.I | re.S,
+    )
+    for match in pattern.finditer(document or ""):
+        attributes = _parse_html_attributes(match.group(1))
+        href = attributes.get("href") or attributes.get("data-href") or attributes.get("data-url")
+        title = _clean_html_text(match.group(2))
+        if not href or not title:
+            continue
+        snippet = document[match.start() : match.start() + 1200]
+        candidate = {
+            "title": title,
+            "url": parse.urljoin(search_url, href),
+            "authors": _normalize_author_list(re.findall(r'author[^>]*>(.*?)<', snippet, flags=re.I | re.S)),
+            "year": extract_year(snippet),
+        }
+        candidates.append(candidate)
+    return candidates
 
 def _payload_from_crossref(message: dict) -> dict:
     issued = message.get("issued", {}).get("date-parts", [[]])
@@ -244,6 +854,153 @@ def _payload_from_google_books(item: dict, normalized: str) -> dict:
     }
 
 
+def _lookup_openurl_metadata(
+    base_url: str,
+    source_provider: str,
+    *,
+    title: str = "",
+    authors: list[str] | None = None,
+    year: int | None = None,
+    doi: str = "",
+    isbn: str = "",
+    entry_type: str | None = None,
+) -> dict:
+    lookup_url = _build_url_with_query(
+        base_url,
+        _build_openurl_query(
+            title=title,
+            authors=authors,
+            year=year,
+            doi=doi,
+            isbn=isbn,
+            entry_type=entry_type,
+        ),
+    )
+    document = _safe_get_text(lookup_url, headers=HTML_HEADERS)
+    payload = extract_partial_metadata_from_html(document, lookup_url, source_provider)
+    payload["metadata_search_url"] = lookup_url
+    if not _payload_has_useful_metadata(
+        payload,
+        title=title,
+        authors=authors,
+        year=year,
+        doi=doi,
+        isbn=isbn,
+        lookup_url=lookup_url,
+        provider_base_url=base_url,
+    ):
+        raise ValueError("未返回可用元数据")
+    return payload
+
+
+def _lookup_cnki_metadata(
+    *,
+    title: str,
+    authors: list[str] | None = None,
+    year: int | None = None,
+    doi: str = "",
+) -> dict:
+    query_text = (doi or title).strip()
+    if not query_text:
+        raise ValueError("缺少可用于知网检索的标题或 DOI")
+    search_url = CNKI_SEARCH.format(query=parse.urlencode({"kw": query_text}))
+    search_document = _safe_get_text(search_url, headers=CNKI_HEADERS)
+    candidates = _extract_cnki_search_candidates(search_document, search_url)
+    if not candidates:
+        raise ValueError("未找到匹配结果")
+
+    best = max(candidates, key=lambda item: _score_title_candidate(item, title, authors or [], year))
+    detail_url = str(best.get("url", "") or search_url)
+    try:
+        detail_document = _safe_get_text(detail_url, headers=CNKI_HEADERS)
+    except ValueError:
+        detail_document = search_document
+        detail_url = search_url
+
+    payload = extract_partial_metadata_from_html(detail_document, detail_url, "CNKI")
+    payload = _merge_partial_payload(payload, best)
+    payload["url"] = detail_url
+    payload["source_provider"] = "CNKI"
+    payload["metadata_search_url"] = search_url
+    if not _payload_has_useful_metadata(
+        payload,
+        title=title,
+        authors=authors,
+        year=year,
+        doi=doi,
+        lookup_url=search_url,
+        provider_base_url="https://kns.cnki.net/",
+    ):
+        raise ValueError("知网未返回可用元数据")
+    return payload
+
+
+def _lookup_doi_cnki(doi: str) -> dict:
+    return _lookup_cnki_metadata(title="", authors=[], year=None, doi=doi)
+
+
+def _lookup_doi_ustc_openurl(doi: str) -> dict:
+    return _lookup_openurl_metadata(USTC_OPENURL, "USTC OpenURL", doi=doi)
+
+
+def _lookup_doi_tsinghua_openurl(doi: str) -> dict:
+    return _lookup_openurl_metadata(TSINGHUA_OPENURL, "Tsinghua OpenURL", doi=doi)
+
+
+def _lookup_isbn_ustc_openurl(isbn: str) -> dict:
+    return _lookup_openurl_metadata(
+        USTC_OPENURL,
+        "USTC OpenURL",
+        isbn=isbn,
+        entry_type="book",
+    )
+
+
+def _lookup_isbn_tsinghua_openurl(isbn: str) -> dict:
+    return _lookup_openurl_metadata(
+        TSINGHUA_OPENURL,
+        "Tsinghua OpenURL",
+        isbn=isbn,
+        entry_type="book",
+    )
+
+
+def _lookup_title_cnki(title: str, authors: list[str], year: int | None, entry_type: str | None) -> dict:
+    return _lookup_cnki_metadata(title=title, authors=authors, year=year)
+
+
+def _lookup_title_ustc_openurl(
+    title: str,
+    authors: list[str],
+    year: int | None,
+    entry_type: str | None,
+) -> dict:
+    return _lookup_openurl_metadata(
+        USTC_OPENURL,
+        "USTC OpenURL",
+        title=title,
+        authors=authors,
+        year=year,
+        entry_type=entry_type,
+    )
+
+
+def _lookup_title_tsinghua_openurl(
+    title: str,
+    authors: list[str],
+    year: int | None,
+    entry_type: str | None,
+) -> dict:
+    return _lookup_openurl_metadata(
+        TSINGHUA_OPENURL,
+        "Tsinghua OpenURL",
+        title=title,
+        authors=authors,
+        year=year,
+        entry_type=entry_type,
+    )
+
+
 def _lookup_doi_crossref(doi: str) -> dict:
     payload = _safe_get_json(CROSSREF_WORK.format(doi=parse.quote(doi)))
     message = payload.get("message")
@@ -292,7 +1049,12 @@ def _lookup_isbn_googlebooks(isbn: str) -> dict:
     return _payload_from_google_books(items[0], isbn)
 
 
-def _lookup_title_openalex(title: str, authors: list[str], year: int | None) -> dict:
+def _lookup_title_openalex(
+    title: str,
+    authors: list[str],
+    year: int | None,
+    entry_type: str | None = None,
+) -> dict:
     query_parts = [title.strip()]
     if authors:
         query_parts.append(authors[0])
@@ -305,7 +1067,12 @@ def _lookup_title_openalex(title: str, authors: list[str], year: int | None) -> 
     return _payload_from_openalex(results[0])
 
 
-def _lookup_title_crossref(title: str, authors: list[str], year: int | None) -> dict:
+def _lookup_title_crossref(
+    title: str,
+    authors: list[str],
+    year: int | None,
+    entry_type: str | None = None,
+) -> dict:
     query_parts = [title.strip()]
     if authors:
         query_parts.append(authors[0])
@@ -334,6 +1101,9 @@ def lookup_doi(doi: str, preferred_sources: list[str] | None = None) -> dict:
         "crossref": _lookup_doi_crossref,
         "datacite": _lookup_doi_datacite,
         "openalex": _lookup_doi_openalex,
+        "cnki": _lookup_doi_cnki,
+        "ustc_openurl": _lookup_doi_ustc_openurl,
+        "tsinghua_openurl": _lookup_doi_tsinghua_openurl,
     }
     errors: list[str] = []
     chain = _provider_chain(preferred_sources, list(providers))
@@ -354,6 +1124,8 @@ def lookup_isbn(isbn: str, preferred_sources: list[str] | None = None) -> dict:
     providers = {
         "openlibrary": _lookup_isbn_openlibrary,
         "googlebooks": _lookup_isbn_googlebooks,
+        "ustc_openurl": _lookup_isbn_ustc_openurl,
+        "tsinghua_openurl": _lookup_isbn_tsinghua_openurl,
     }
     errors: list[str] = []
     chain = _provider_chain(preferred_sources, list(providers))
@@ -371,14 +1143,18 @@ def lookup_title_metadata(
     title: str,
     authors: list[str] | None = None,
     year: int | None = None,
+    entry_type: str | None = None,
     preferred_sources: list[str] | None = None,
 ) -> dict:
     text = (title or "").strip()
     if not text:
         raise ValueError("缺少标题，无法执行标题回退查询。")
     providers = {
-        "openalex": lambda: _lookup_title_openalex(text, authors or [], year),
-        "crossref": lambda: _lookup_title_crossref(text, authors or [], year),
+        "openalex": lambda: _lookup_title_openalex(text, authors or [], year, entry_type),
+        "crossref": lambda: _lookup_title_crossref(text, authors or [], year, entry_type),
+        "cnki": lambda: _lookup_title_cnki(text, authors or [], year, entry_type),
+        "ustc_openurl": lambda: _lookup_title_ustc_openurl(text, authors or [], year, entry_type),
+        "tsinghua_openurl": lambda: _lookup_title_tsinghua_openurl(text, authors or [], year, entry_type),
     }
     errors: list[str] = []
     chain = _provider_chain(preferred_sources, list(providers))

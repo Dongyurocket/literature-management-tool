@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import traceback
 import webbrowser
 from pathlib import Path
 
@@ -113,6 +114,8 @@ class QtMainWindow(QMainWindow):
         self._loading_notes = False
         self._maintenance_dialog: MaintenanceDialog | None = None
         self._thread_pool = QThreadPool.globalInstance()
+        self._busy_tasks: list[tuple[int, str]] = []
+        self._busy_task_seq = 0
 
         self._metadata_save_timer = QTimer(self)
         self._metadata_save_timer.setInterval(650)
@@ -170,11 +173,41 @@ class QtMainWindow(QMainWindow):
     def _show_toast(self, title: str, message: str, *, level: str = "info", duration_ms: int = 3200) -> None:
         self._toast_overlay.push(title, message, level=level, duration_ms=duration_ms)
 
-    def _set_busy(self, busy: bool, message: str = "") -> None:
-        self.busy_progress.setVisible(busy)
-        self.busy_label.setText(message if busy else "就绪")
-        if message:
-            self.statusBar().showMessage(message, 0 if busy else 3000)
+    def _refresh_busy_state(self) -> None:
+        if self._busy_tasks:
+            message = self._busy_tasks[-1][1]
+            self.busy_progress.setVisible(True)
+            self.busy_label.setText(message)
+            self.statusBar().showMessage(message)
+            return
+        self.busy_progress.setVisible(False)
+        self.busy_label.setText("就绪")
+        self.statusBar().clearMessage()
+        self.statusBar().showMessage("工作区已就绪。", 2500)
+
+    def _begin_busy_task(self, message: str) -> int:
+        self._busy_task_seq += 1
+        token = self._busy_task_seq
+        self._busy_tasks.append((token, message or "正在处理…"))
+        self._refresh_busy_state()
+        return token
+
+    def _end_busy_task(self, token: int) -> None:
+        self._busy_tasks = [item for item in self._busy_tasks if item[0] != token]
+        self._refresh_busy_state()
+
+    def _run_ui_callback(self, callback, *args, error_title: str) -> None:
+        if callback is None:
+            return
+        try:
+            callback(*args)
+        except Exception:
+            self._show_toast(
+                error_title,
+                self._error_summary(traceback.format_exc()),
+                level="error",
+                duration_ms=5200,
+            )
 
     def _refresh_header_subtitle(self) -> None:
         profile = self.viewmodel.controller.current_library_profile()
@@ -206,12 +239,11 @@ class QtMainWindow(QMainWindow):
         success_toast: tuple[str, str] | None = None,
         error_title: str = "操作失败",
     ) -> None:
-        self._set_busy(True, label)
+        task_token = self._begin_busy_task(label)
         worker = AsyncWorker(task)
 
         def handle_result(result) -> None:
-            if on_result is not None:
-                on_result(result)
+            self._run_ui_callback(on_result, result, error_title=error_title)
             if success_toast is not None:
                 self._show_toast(success_toast[0], success_toast[1], level="success")
 
@@ -219,9 +251,10 @@ class QtMainWindow(QMainWindow):
             self._show_toast(error_title, self._error_summary(error_text), level="error", duration_ms=5200)
 
         def handle_finished() -> None:
-            self._set_busy(False)
-            if on_finished is not None:
-                on_finished()
+            try:
+                self._run_ui_callback(on_finished, error_title=error_title)
+            finally:
+                self._end_busy_task(task_token)
 
         worker.signals.result.connect(handle_result)
         worker.signals.error.connect(handle_error)
@@ -979,6 +1012,8 @@ class QtMainWindow(QMainWindow):
             self._import_paths(selected)
 
     def _import_paths(self, paths: list[str]) -> None:
+        preserve_id = self._current_literature_id
+
         def task(controller):
             return controller.import_paths(paths)
 
@@ -1003,7 +1038,7 @@ class QtMainWindow(QMainWindow):
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
-            preserve_id=self._current_literature_id,
+            preserve_id=preserve_id,
             error_title="导入失败",
         )
 
@@ -1132,6 +1167,7 @@ class QtMainWindow(QMainWindow):
             self._open_library_profiles()
 
     def _run_selected_pdf_ocr(self) -> None:
+        preserve_id = self._current_literature_id
         if not has_ocr_config(self.viewmodel.controller.settings):
             self._show_toast(
                 "OCR 提取",
@@ -1170,14 +1206,15 @@ class QtMainWindow(QMainWindow):
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
-            preserve_id=self._current_literature_id,
+            preserve_id=preserve_id,
             error_title="OCR 提取失败",
         )
 
     def _lookup_metadata(self) -> None:
         if self._current_literature_id is None:
             return
-        detail = self.viewmodel.controller.get_literature(self._current_literature_id)
+        literature_id = self._current_literature_id
+        detail = self.viewmodel.controller.get_literature(literature_id)
         if not detail:
             return
         manual_identifier = ""
@@ -1190,7 +1227,7 @@ class QtMainWindow(QMainWindow):
 
         def task(controller):
             return controller.lookup_metadata_for_literature(
-                self._current_literature_id,
+                literature_id,
                 manual_identifier=manual_identifier,
             )
 
@@ -1202,11 +1239,11 @@ class QtMainWindow(QMainWindow):
             preview = MetadataPreviewDialog(payload, self)
             if preview.exec() == 0:
                 return
-            merged = self.viewmodel.controller.apply_metadata_payload(self._current_literature_id, payload)
+            merged = self.viewmodel.controller.apply_metadata_payload(literature_id, payload)
             if merged is None:
                 return
             self._refresh_after_library_change(
-                preserve_id=self._current_literature_id,
+                preserve_id=literature_id,
                 navigation_key=self._current_navigation_key(),
             )
             self._show_toast(
@@ -1223,6 +1260,7 @@ class QtMainWindow(QMainWindow):
         )
 
     def _open_import_center(self) -> None:
+        preserve_id = self._current_literature_id
         dialog = ImportCenterDialog(self.viewmodel.controller.settings, self)
         if dialog.exec() == 0:
             return
@@ -1246,7 +1284,7 @@ class QtMainWindow(QMainWindow):
             on_result=handle_result,
             reload_after=True,
             refresh_after=True,
-            preserve_id=self._current_literature_id,
+            preserve_id=preserve_id,
             error_title="导入失败",
         )
 
@@ -1292,6 +1330,7 @@ class QtMainWindow(QMainWindow):
         self._show_toast("已复制", f"已复制 {len(references)} 条 GB/T 参考文献。", level="success")
 
     def _rename_pdfs(self) -> None:
+        preserve_id = self._current_literature_id
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
             self._show_toast("PDF 重命名", "请至少选择一条文献记录。", level="warning")
@@ -1320,7 +1359,7 @@ class QtMainWindow(QMainWindow):
                 on_result=handle_renamed,
                 reload_after=True,
                 refresh_after=True,
-                preserve_id=self._current_literature_id,
+                preserve_id=preserve_id,
                 error_title="PDF 重命名失败",
             )
 

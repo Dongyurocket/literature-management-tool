@@ -18,6 +18,9 @@ DEFAULT_METADATA_SOURCES = [
     "crossref",
     "datacite",
     "openalex",
+    "cnki",
+    "ustc_openurl",
+    "tsinghua_openurl",
     "openlibrary",
     "googlebooks",
 ]

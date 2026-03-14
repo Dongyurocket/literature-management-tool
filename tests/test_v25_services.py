@@ -6,6 +6,7 @@ from unittest import mock
 
 from literature_manager.config import AppSettings, SettingsStore
 from literature_manager.controllers import LibraryController
+from literature_manager.metadata_service import extract_partial_metadata_from_html, lookup_title_metadata
 from literature_manager.ocr_service import (
     extract_pdf_text_with_ocr,
     read_umi_ocr_server_port,
@@ -70,6 +71,104 @@ class MetadataFallbackTests(unittest.TestCase):
                     _detail, payload = controller.lookup_metadata_for_literature(literature_id)
                 self.assertEqual(payload["source_provider"], "OpenAlex")
                 self.assertIn("metadata_lookup_notice", payload)
+
+    def test_manual_identifier_overrides_existing_doi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                literature_id = controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "Override Identifier",
+                        "year": 2024,
+                        "doi": "10.1000/original",
+                        "authors": ["Alice Example"],
+                        "tags": [],
+                    }
+                )
+                with mock.patch(
+                    "literature_manager.controllers.library_controller.lookup_doi"
+                ) as lookup_doi_mock, mock.patch(
+                    "literature_manager.controllers.library_controller.lookup_isbn",
+                    return_value={"title": "ISBN Result", "source_provider": "OpenLibrary"},
+                ) as lookup_isbn_mock:
+                    _detail, payload = controller.lookup_metadata_for_literature(
+                        literature_id,
+                        manual_identifier="9787300000000",
+                    )
+                lookup_doi_mock.assert_not_called()
+                lookup_isbn_mock.assert_called_once()
+                self.assertEqual(payload["source_provider"], "OpenLibrary")
+
+
+class MetadataProviderParsingTests(unittest.TestCase):
+    def test_extract_partial_metadata_from_html_parses_sfx_context(self):
+        html_text = """
+        <html>
+          <body>
+            <!-- <ctx_object_1>$VAR1 = bless( {
+                 |rft.genre| => |article|,
+                 |rft.atitle| => |Attention Is All You Need|,
+                 |rft.jtitle| => |arXiv|,
+                 |rft.date| => |2017|,
+                 |@rft.au| => [
+                                |Vaswani, Ashish|
+                              ]
+               }, |ContextObject::Generic| );
+            </ctx_object_1> //-->
+          </body>
+        </html>
+        """
+        payload = extract_partial_metadata_from_html(
+            html_text,
+            "http://resolver.example/openurl",
+            "USTC OpenURL",
+        )
+        self.assertEqual(payload["title"], "Attention Is All You Need")
+        self.assertEqual(payload["publication_title"], "arXiv")
+        self.assertEqual(payload["year"], 2017)
+        self.assertIn("Vaswani, Ashish", payload["authors"])
+
+    def test_lookup_title_metadata_can_parse_cnki_html(self):
+        search_html = """
+        <html>
+          <body>
+            <a class="fz14" href="/detail/test">中文文献标题</a>
+            <span class="author">张三;李四</span>
+            <span class="date">2024</span>
+          </body>
+        </html>
+        """
+        detail_html = """
+        <html>
+          <head>
+            <meta name="citation_title" content="中文文献标题" />
+            <meta name="citation_author" content="张三" />
+            <meta name="citation_author" content="李四" />
+            <meta name="citation_journal_title" content="测试期刊" />
+            <meta name="citation_publication_date" content="2024-03-01" />
+            <meta name="citation_doi" content="10.1000/cnki-demo" />
+            <meta name="citation_abstract_html_url" content="https://kns.cnki.net/detail/test" />
+            <meta name="citation_keywords" content="人工智能;知识图谱" />
+            <meta name="description" content="这是一段中文摘要。" />
+          </head>
+        </html>
+        """
+        with mock.patch(
+            "literature_manager.metadata_service._safe_get_text",
+            side_effect=[search_html, detail_html],
+        ):
+            payload = lookup_title_metadata(
+                "中文文献标题",
+                authors=["张三"],
+                year=2024,
+                preferred_sources=["cnki"],
+            )
+        self.assertEqual(payload["source_provider"], "CNKI")
+        self.assertEqual(payload["publication_title"], "测试期刊")
+        self.assertEqual(payload["doi"], "10.1000/cnki-demo")
+        self.assertIn("张三", payload["authors"])
+        self.assertIn("人工智能", payload["keywords"])
+        self.assertIn("kw=", payload["metadata_search_url"])
 
 
 class OcrAndUpdateTests(unittest.TestCase):

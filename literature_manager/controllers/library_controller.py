@@ -262,7 +262,7 @@ class LibraryController:
             return None, None
 
         preferred_sources = self._preferred_metadata_sources()
-        identifier = (detail.get("doi") or detail.get("isbn") or manual_identifier).strip()
+        identifier = (manual_identifier or detail.get("doi") or detail.get("isbn") or "").strip()
         errors: list[str] = []
 
         if identifier:
@@ -280,6 +280,7 @@ class LibraryController:
                 detail.get("title", ""),
                 authors=detail.get("authors", []),
                 year=detail.get("year"),
+                entry_type=detail.get("entry_type"),
                 preferred_sources=preferred_sources,
             )
             if errors:

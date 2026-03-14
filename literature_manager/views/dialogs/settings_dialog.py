@@ -27,6 +27,9 @@ METADATA_SOURCE_LABELS = {
     "crossref": "Crossref（DOI）",
     "datacite": "DataCite（DOI）",
     "openalex": "OpenAlex（DOI / 标题）",
+    "cnki": "知网（中文文章）",
+    "ustc_openurl": "中科大图书馆 OpenURL",
+    "tsinghua_openurl": "清华图书馆 OpenURL",
     "openlibrary": "OpenLibrary（ISBN）",
     "googlebooks": "Google Books（ISBN）",
 }

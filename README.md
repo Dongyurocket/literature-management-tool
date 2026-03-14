@@ -11,17 +11,31 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
-## V0.3.0 更新
+## V0.3.1 更新
 
-这一版继续沿着 Qt 桌面版深挖，但重点已经转向“面向中文研究工作流”的完善：不仅界面整体中文化，还补上了自动更新、扫描版 PDF OCR、模板导出、多文库切换与更细的重复对比能力。
+这一版重点补齐两条线：一是中文研究场景下的元数据抓取质量，二是 Qt 高频交互下的稳定性。现在已经支持从高校图书馆 OpenURL 与 CNKI 抓取可用元数据字段，并修复了部分异步任务明明完成但界面仍显示“正在进行中”的状态问题。
 
-- 主界面、工具对话框、设置页、统计页已切换为中文界面，默认文案面向中文用户
-- 增加 GitHub Release 更新能力，可在软件内检查新版本并下载 `Setup.exe`
-- 可在设置中一键下载安装并调用 `Umi-OCR`，也支持回退到自定义 OCR 命令
-- 元数据回退链路扩展为 `Crossref / DataCite / OpenAlex / OpenLibrary / Google Books`
-- 新增模板导出与统计报表导出，支持 Markdown / CSV / HTML / JSON
-- 支持多文库切换与归档库管理，每个文库使用独立数据库与设置文件
-- 重复检测界面升级为字段级冲突对比，支持先预览再合并
+- 元数据回退链路扩展为 `Crossref / DataCite / OpenAlex / CNKI / USTC OpenURL / THU OpenURL / OpenLibrary / Google Books`
+- 支持从图书馆 OpenURL 解析器补充在线检索到的可用字段，并保留检索链接
+- 支持从知网抓取中文文章的可用元数据字段
+- 元数据字段允许部分补全，未抓到的字段可留空并继续手动编辑
+- 修复后台任务状态显示问题（如 PDF 重命名、Umi 下载、软件更新下载）
+- 补充 Qt 交互回归测试，覆盖任务回调异常、嵌套任务状态恢复等高风险路径
+- 已完成 Windows 安装包打包与静默安装 / 卸载 / 启动烟雾验证
+
+### 新界面截图（v0.3.1）
+
+主界面（文献列表、详情编辑、顶部工具入口）：
+
+![v0.3.1 主界面](docs/screenshots/v0.3.1-main-window.png)
+
+设置页（元数据源、OCR、更新配置）：
+
+![v0.3.1 设置页](docs/screenshots/v0.3.1-settings.png)
+
+更新对话框（版本信息与下载入口）：
+
+![v0.3.1 更新对话框](docs/screenshots/v0.3.1-update-dialog.png)
 
 ## 核心能力速览
 
@@ -123,7 +137,10 @@
 - DOI 查询补全元数据
 - ISBN 查询补全元数据
 - 当 DOI / ISBN 不可用或查询失败时，自动按标题回退检索
-- 元数据源可配置为 `Crossref -> DataCite -> OpenAlex -> OpenLibrary -> Google Books`
+- 元数据源可配置为 `Crossref -> DataCite -> OpenAlex -> CNKI -> USTC OpenURL -> THU OpenURL -> OpenLibrary -> Google Books`
+- 支持从图书馆 OpenURL 解析器补充在线检索到的可用字段，并保留检索链接
+- 支持从知网抓取中文文章的可用元数据字段
+- 元数据字段允许部分补全，未抓到的字段可留空并继续手动编辑
 - 从 `bib / ris / pdf / docx / md / txt` 导入资料
 - 导入中心批量扫描和导入
 
@@ -400,19 +417,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.1
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.3.0-Setup.exe`：带中文安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.3.1-Setup.exe`：带中文安装向导的 Windows 安装包
 
 当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.3.0` 的标签时：
+当推送形如 `v0.3.1` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -437,21 +454,18 @@ python -m unittest discover -s tests -v
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.3.0）
+## 当前版本亮点（V0.3.1）
 
-- Qt 成为唯一桌面界面实现，旧 Tkinter 文件已移除
-- 支持 `docx` 文件笔记与自定义 PDF 阅读器
-- 支持全文检索与搜索索引重建
-- 支持一键下载安装并调用 `Umi-OCR`，也支持外部命令模式
+- 新增 `CNKI / USTC OpenURL / THU OpenURL` 元数据回退源，提升中文文献可补全率
+- 元数据抓取支持“部分字段即返回”，并保留手动编辑空间，避免全有或全无
+- 修复异步任务状态残留：任务成功后会正确回到“就绪”，不再卡住“正在进行中”
+- 加强 Qt 异步回调异常保护，避免回调报错导致 UI 状态无法收敛
+- 新增 Qt 交互回归测试，覆盖重命名、更新下载、Umi 安装等易回归场景
+- 支持一键下载安装并调用 `Umi-OCR`，并可读取实际服务端口调用 OCR 接口
 - 支持 GitHub Release 检查更新与下载 `Setup.exe`
-- 支持多文库切换、归档库管理
-- 支持查重与合并
-- 支持重复项字段级对比与合并预览
-- 支持备份 / 恢复与路径修复
-- 支持 PDF 批量重命名预览与执行
-- 支持 BibTeX、CSL JSON、GB/T 7714 文本导出
-- 支持 Markdown / CSV / HTML 模板导出与统计报表导出
-- 提供 Windows 安装版 `Setup.exe`
+- 支持多文库切换、归档库管理、查重合并、路径修复、备份恢复
+- 支持 BibTeX / CSL JSON / GB/T 7714 导出，以及 Markdown / CSV / HTML / JSON 报表导出
+- 提供 Windows 安装版 `Setup.exe`，可用于本地部署与自动发布
 
 ## 已知限制
 
