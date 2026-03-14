@@ -27,7 +27,7 @@ TSINGHUA_OPENURL = (
 )
 CNKI_SEARCH = "https://kns.cnki.net/kns8s/defaultresult/index?{query}"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.1",
+    "User-Agent": "LiteratureManagementTool/0.3.2",
     "Accept": "application/json",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }

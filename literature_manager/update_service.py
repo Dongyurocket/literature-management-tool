@@ -7,7 +7,7 @@ from urllib import error, request
 
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.1",
+    "User-Agent": "LiteratureManagementTool/0.3.2",
     "Accept": "application/vnd.github+json",
 }
 
