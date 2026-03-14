@@ -9,6 +9,7 @@ from urllib import error, parse, request
 
 from pypdf import PdfReader
 
+from . import __version__
 from .config import AppSettings
 from .ocr_service import extract_pdf_text_with_ocr
 from .utils import detect_note_format, extract_year, normalize_for_compare, sanitize_filename
@@ -27,7 +28,7 @@ TSINGHUA_OPENURL = (
 )
 CNKI_SEARCH = "https://kns.cnki.net/kns8s/defaultresult/index?{query}"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.2",
+    "User-Agent": f"LiteratureManagementTool/{__version__}",
     "Accept": "application/json",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }

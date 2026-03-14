@@ -11,6 +11,18 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
+## V0.3.4 更新
+
+这一版聚焦工程化体验和桌面版稳定性，补齐开发依赖安装入口，并继续优化数据库、MVVM 分层和后台任务处理。
+
+- 新增 `dev` extra，可通过 `python -m pip install -e ".[dev]"` 一次安装开发、测试和本地打包依赖
+- SQLite 默认启用 `WAL`，并为 `year`、`subject`、`reading_status` 增加索引，降低并发访问与列表筛选压力
+- 文献列表中的附件/笔记数量改为聚合统计，减少重复子查询
+- `MainWindowViewModel` 新增元数据保存、新建文献、删除文献等封装，降低 View 对 Controller 的直接耦合
+- 元数据页增加“脏检查”，未改动时不再触发无意义写库
+- `AsyncWorker` 返回结构化错误信息，界面侧统一处理异步失败提示
+- 全量测试已验证通过：`49` 项 `unittest`
+
 ## V0.3.3 热修复
 
 这一版聚焦“检查更新”的稳定性，修复部分环境下 GitHub API 返回 `HTTP 403` 直接报错的问题。
@@ -263,6 +275,13 @@ python -m pip install -U pip
 python -m pip install .
 ```
 
+如果你需要开发、跑测试或本地打包，建议直接安装开发依赖：
+
+```bash
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
 启动程序：
 
 ```bash
@@ -411,10 +430,11 @@ literature-management-tool/
 
 ### 生成 Windows 安装包
 
-先安装打包依赖：
+先安装开发 / 打包依赖：
 
 ```bash
-python -m pip install pyinstaller
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
 再安装 Inno Setup（任选其一）：
@@ -426,19 +446,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.2
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.4
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.3.2-Setup.exe`：带中文安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.3.4-Setup.exe`：带中文安装向导的 Windows 安装包
 
 当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.3.2` 的标签时：
+当推送形如 `v0.3.4` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -451,10 +471,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.
 
 ## 测试
 
-运行单元测试：
+推荐先安装开发依赖：
 
 ```bash
+python -m pip install -e ".[dev]"
+```
+
+运行全量单元测试（PowerShell）：
+
+```powershell
+$env:QT_QPA_PLATFORM='offscreen'
 python -m unittest discover -s tests -v
+```
+
+也可以使用 `pytest`：
+
+```powershell
+$env:QT_QPA_PLATFORM='offscreen'
+python -m pytest -q
 ```
 
 可选语法检查：
@@ -463,18 +497,15 @@ python -m unittest discover -s tests -v
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.3.2）
+## 当前版本亮点（V0.3.4）
 
-- 新增文献列表手动刷新能力（按钮 + `F5`），并提供明确反馈
-- 刷新前自动保存当前编辑中的元数据，减少误操作导致的数据丢失
-- 修复多处“任务已完成但状态栏仍显示运行中”的残留问题
-- 增加后台任务状态守护机制，异常残留时可自动恢复到“就绪”
-- 元数据抓取改为每次仅使用一个已选来源，避免多源混合回退
-- 元数据合并增强：支持占位标题替换、作者去重合并、关键词去重合并
-- 引用键（cite_key）支持手动编辑并自动保存
-- 支持一键下载安装并调用 `Umi-OCR`，并可读取实际服务端口调用 OCR 接口
-- 支持 GitHub Release 检查更新与下载 `Setup.exe`
-- 提供 Windows 安装版 `Setup.exe`，可用于本地部署与自动发布
+- 开发环境支持 `python -m pip install -e ".[dev]"` 一键安装测试和打包依赖
+- 数据库默认启用 `WAL`，并增加筛选字段索引，提升并发与查询稳定性
+- 文献列表聚合统计附件数和笔记数，减少列表刷新时的数据库压力
+- 主窗口通过 ViewModel 路由保存、新建、删除逻辑，MVVM 分层更清晰
+- 元数据编辑页增加脏检查，未变更内容不再重复写入数据库
+- 异步任务错误改为结构化返回，界面侧提示更稳定
+- 全量 `unittest` 共 `49` 项通过
 
 ## 已知限制
 

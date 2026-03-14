@@ -53,7 +53,7 @@ from ..utils import (
     split_csv,
 )
 from ..viewmodels import MainWindowViewModel, NavigationItem, StatCard
-from .async_worker import AsyncWorker
+from .async_worker import AsyncWorker, WorkerError
 from .components import SearchBar
 from .components import ToastOverlay
 from .dialogs import (
@@ -71,6 +71,10 @@ from .dialogs import (
     UpdateInfoDialog,
 )
 from .theme import apply_theme
+
+TOAST_SELECT_LITERATURE_MESSAGE = "请至少选择一条文献记录。"
+TOAST_EXPORT_SUCCESS_TEMPLATE = "已导出 {count} 条记录到 `{path}`。"
+TOAST_FILE_SAVED_TEMPLATE = "文件已保存到 `{path}`。"
 
 
 class DropOverlay(QFrame):
@@ -112,6 +116,7 @@ class QtMainWindow(QMainWindow):
         self._active_filters: dict[str, object] = {}
         self._navigation_items: dict[str, QTreeWidgetItem] = {}
         self._loading_metadata = False
+        self._metadata_snapshot: dict[str, object] | None = None
         self._loading_notes = False
         self._maintenance_dialog: MaintenanceDialog | None = None
         self._thread_pool = QThreadPool.globalInstance()
@@ -134,7 +139,7 @@ class QtMainWindow(QMainWindow):
 
         self._build_ui()
         self._bind_shortcuts()
-        self._apply_theme(self.viewmodel.controller.settings.ui_theme)
+        self._apply_theme(self.viewmodel.settings.ui_theme)
         self._load_navigation("all")
         self._refresh_stats()
         self._refresh_table()
@@ -179,6 +184,19 @@ class QtMainWindow(QMainWindow):
 
     def _show_toast(self, title: str, message: str, *, level: str = "info", duration_ms: int = 3200) -> None:
         self._toast_overlay.push(title, message, level=level, duration_ms=duration_ms)
+
+    def _show_select_literature_toast(self, title: str) -> None:
+        self._show_toast(title, TOAST_SELECT_LITERATURE_MESSAGE, level="warning")
+
+    def _show_file_saved_toast(self, title: str, path: str) -> None:
+        self._show_toast(title, TOAST_FILE_SAVED_TEMPLATE.format(path=path), level="success")
+
+    def _show_export_success_toast(self, count: int, path: str) -> None:
+        self._show_toast(
+            "导出完成",
+            TOAST_EXPORT_SUCCESS_TEMPLATE.format(count=count, path=path),
+            level="success",
+        )
 
     def _refresh_busy_state(self) -> None:
         if self._busy_tasks:
@@ -240,7 +258,7 @@ class QtMainWindow(QMainWindow):
             )
 
     def _refresh_header_subtitle(self) -> None:
-        profile = self.viewmodel.controller.current_library_profile()
+        profile = self.viewmodel.current_library_profile()
         library_name = profile.get("name", "默认文献库")
         archive_state = "（已归档）" if profile.get("archived") else ""
         self.header_subtitle.setText(
@@ -249,14 +267,14 @@ class QtMainWindow(QMainWindow):
         )
 
     def _reload_primary_controller(self) -> None:
-        settings = self.viewmodel.controller.settings_store.load()
-        self.viewmodel.controller.settings = settings
-        self.viewmodel.controller.reload_database()
+        settings = self.viewmodel.reload_settings_and_database()
         self._apply_theme(settings.ui_theme)
         self._refresh_header_subtitle()
 
-    def _error_summary(self, error_text: str) -> str:
-        parts = [line.strip() for line in error_text.splitlines() if line.strip()]
+    def _error_summary(self, error: WorkerError | str) -> str:
+        if isinstance(error, WorkerError):
+            return error.message.strip() or error.exception_type or "未知错误"
+        parts = [line.strip() for line in error.splitlines() if line.strip()]
         return parts[-1] if parts else "未知错误"
 
     def _run_async_task(
@@ -265,6 +283,7 @@ class QtMainWindow(QMainWindow):
         label: str,
         task,
         on_result=None,
+        on_error=None,
         on_finished=None,
         success_toast: tuple[str, str] | None = None,
         error_title: str = "操作失败",
@@ -286,9 +305,12 @@ class QtMainWindow(QMainWindow):
             if success_toast is not None:
                 self._show_toast(success_toast[0], success_toast[1], level="success")
 
-        def handle_error(error_text: str) -> None:
+        def handle_error(error: WorkerError | str) -> None:
             close_busy_once()
-            self._show_toast(error_title, self._error_summary(error_text), level="error", duration_ms=5200)
+            if on_error is not None:
+                self._run_ui_callback(on_error, error, error_title=error_title)
+                return
+            self._show_toast(error_title, self._error_summary(error), level="error", duration_ms=5200)
 
         def handle_finished() -> None:
             try:
@@ -314,7 +336,7 @@ class QtMainWindow(QMainWindow):
         error_title: str = "操作失败",
     ) -> None:
         def task():
-            controller = self.viewmodel.controller.clone(auto_rebuild_index=False)
+            controller = self.viewmodel.clone_controller(auto_rebuild_index=False)
             try:
                 return controller_task(controller)
             finally:
@@ -938,67 +960,70 @@ class QtMainWindow(QMainWindow):
     def _schedule_metadata_save(self) -> None:
         if self._loading_metadata or self._current_literature_id is None:
             return
+        if not self._metadata_is_dirty():
+            self.metadata_save_label.setText("已保存")
+            self._metadata_save_timer.stop()
+            return
         self.metadata_save_label.setText("即将保存…")
         self._metadata_save_timer.start()
+
+    def _collect_metadata_payload(self) -> dict[str, object]:
+        return {
+            "entry_type": str(self.entry_type_combo.currentData()),
+            "title": self.title_edit.text().strip(),
+            "translated_title": self.translated_title_edit.text().strip(),
+            "authors": split_csv(self.authors_edit.text().replace("\n", ",")),
+            "year": int(self.year_edit.text()) if self.year_edit.text().strip().isdigit() else None,
+            "month": self.month_edit.text().strip(),
+            "subject": self.subject_edit.text().strip(),
+            "keywords": self.keywords_edit.text().strip(),
+            "tags": split_csv(self.tags_edit.text().replace("\n", ",")),
+            "reading_status": str(self.reading_status_combo.currentData()),
+            "rating": self.rating_spin.value() or None,
+            "publication_title": self.publication_title_edit.text().strip(),
+            "publisher": self.publisher_edit.text().strip(),
+            "school": self.school_edit.text().strip(),
+            "conference_name": self.conference_name_edit.text().strip(),
+            "standard_number": self.standard_number_edit.text().strip(),
+            "patent_number": self.patent_number_edit.text().strip(),
+            "volume": self.volume_edit.text().strip(),
+            "issue": self.issue_edit.text().strip(),
+            "pages": self.pages_edit.text().strip(),
+            "doi": self.doi_edit.text().strip(),
+            "isbn": self.isbn_edit.text().strip(),
+            "url": self.url_edit.text().strip(),
+            "language": self.language_edit.text().strip(),
+            "country": self.country_edit.text().strip(),
+            "summary": self.summary_edit.toPlainText().strip(),
+            "abstract": self.abstract_edit.toPlainText().strip(),
+            "remarks": self.remarks_edit.toPlainText().strip(),
+            "cite_key": self.cite_key_edit.text().strip(),
+        }
+
+    def _metadata_is_dirty(self) -> bool:
+        if self._metadata_snapshot is None:
+            return False
+        current_payload = self.viewmodel.normalize_metadata_payload(self._collect_metadata_payload())
+        return current_payload != self._metadata_snapshot
 
     def _save_metadata_changes(self) -> None:
         if self._loading_metadata or self._current_literature_id is None:
             return
-        detail = self.viewmodel.detail_payload(self._current_literature_id)
-        if not detail:
+        if not self._metadata_is_dirty():
+            self.metadata_save_label.setText("已保存")
             return
-        payload = dict(detail)
-        payload.update(
-            {
-                "id": self._current_literature_id,
-                "entry_type": str(self.entry_type_combo.currentData()),
-                "title": self.title_edit.text().strip() or "未命名文献",
-                "translated_title": self.translated_title_edit.text().strip(),
-                "authors": split_csv(self.authors_edit.text().replace("\n", ",")),
-                "year": int(self.year_edit.text()) if self.year_edit.text().strip().isdigit() else None,
-                "month": self.month_edit.text().strip(),
-                "subject": self.subject_edit.text().strip(),
-                "keywords": self.keywords_edit.text().strip(),
-                "tags": split_csv(self.tags_edit.text().replace("\n", ",")),
-                "reading_status": str(self.reading_status_combo.currentData()),
-                "rating": self.rating_spin.value() or None,
-                "publication_title": self.publication_title_edit.text().strip(),
-                "publisher": self.publisher_edit.text().strip(),
-                "school": self.school_edit.text().strip(),
-                "conference_name": self.conference_name_edit.text().strip(),
-                "standard_number": self.standard_number_edit.text().strip(),
-                "patent_number": self.patent_number_edit.text().strip(),
-                "volume": self.volume_edit.text().strip(),
-                "issue": self.issue_edit.text().strip(),
-                "pages": self.pages_edit.text().strip(),
-                "doi": self.doi_edit.text().strip(),
-                "isbn": self.isbn_edit.text().strip(),
-                "url": self.url_edit.text().strip(),
-                "language": self.language_edit.text().strip(),
-                "country": self.country_edit.text().strip(),
-                "summary": self.summary_edit.toPlainText().strip(),
-                "abstract": self.abstract_edit.toPlainText().strip(),
-                "remarks": self.remarks_edit.toPlainText().strip(),
-                "cite_key": self.cite_key_edit.text().strip(),
-            }
+        refreshed = self.viewmodel.save_metadata(
+            self._current_literature_id,
+            self._collect_metadata_payload(),
         )
-        self.viewmodel.controller.save_literature(payload)
-        refreshed = self.viewmodel.detail_payload(self._current_literature_id)
         self._update_detail_header(refreshed)
         self.cite_key_edit.setText(refreshed.get("cite_key", "") or "")
+        self._metadata_snapshot = self.viewmodel.normalize_metadata_payload(refreshed)
         self.metadata_save_label.setText("已保存")
         self.statusBar().showMessage("元数据已保存。", 2500)
 
     def _create_literature(self) -> None:
-        literature_id = self.viewmodel.controller.save_literature(
-            {
-                "entry_type": "journal_article",
-                "title": "未命名文献",
-                "authors": [],
-                "tags": [],
-                "reading_status": READING_STATUSES[0],
-            }
-        )
+        literature_id = self.viewmodel.create_new_literature()
         self.search_bar.line_edit.clear()
         self._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
         self._show_toast("已创建", "已新建一条文献记录，可立即编辑。", level="success")
@@ -1016,16 +1041,16 @@ class QtMainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         deleted_id = self._current_literature_id
-        self.viewmodel.controller.delete_literature(deleted_id)
+        self.viewmodel.delete_literature(deleted_id)
         self._refresh_after_library_change(navigation_key=self._current_navigation_key())
         self._show_toast("已删除", f"文献 #{deleted_id} 已删除。", level="success")
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self.viewmodel.controller.settings, self)
+        dialog = SettingsDialog(self.viewmodel.settings, self)
         if dialog.exec() == 0:
             return
         settings = dialog.value()
-        self.viewmodel.controller.save_settings(settings)
+        self.viewmodel.save_settings(settings)
         self._apply_theme(settings.ui_theme)
         if dialog.request_install_umi:
             def handle_result(result) -> None:
@@ -1089,9 +1114,9 @@ class QtMainWindow(QMainWindow):
     def _export_selected_bib(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            QMessageBox.information(self, "导出 Bib", "请至少选择一条文献记录。")
+            self._show_select_literature_toast("导出 Bib")
             return
-        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        initial_dir = self.viewmodel.settings.recent_export_dir or str(Path.cwd())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出 BibTeX",
@@ -1100,25 +1125,25 @@ class QtMainWindow(QMainWindow):
         )
         if not path:
             return
-        count = self.viewmodel.controller.export_bib(literature_ids, path)
-        self._show_toast("导出完成", f"已导出 {count} 条记录到 `{path}`。", level="success")
+        count = self.viewmodel.export_bib(literature_ids, path)
+        self._show_export_success_toast(count, path)
 
     def _export_selected_template(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("模板导出", "请至少选择一条文献记录。", level="warning")
+            self._show_select_literature_toast("模板导出")
             return
         dialog = TemplateChoiceDialog(
             "选择导出模板",
-            self.viewmodel.controller.list_export_templates(),
-            current_key=self.viewmodel.controller.settings.preferred_export_template,
+            self.viewmodel.list_export_templates(),
+            current_key=self.viewmodel.settings.preferred_export_template,
             parent=self,
         )
         if dialog.exec() == 0 or not dialog.selected_key:
             return
         template_key = dialog.selected_key
-        suffix = self.viewmodel.controller.suggested_export_extension(template_key)
-        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        suffix = self.viewmodel.suggested_export_extension(template_key)
+        initial_dir = self.viewmodel.settings.recent_export_dir or str(Path.cwd())
         default_name = f"文献模板导出{suffix}"
         filters = {
             ".md": "Markdown (*.md)",
@@ -1134,8 +1159,8 @@ class QtMainWindow(QMainWindow):
         )
         if not path:
             return
-        export_path = self.viewmodel.controller.export_template(literature_ids, template_key, path)
-        self._show_toast("模板导出完成", f"文件已保存到 `{export_path}`。", level="success")
+        export_path = self.viewmodel.export_template(literature_ids, template_key, path)
+        self._show_file_saved_toast("模板导出完成", export_path)
 
     def _check_updates(self) -> None:
         def handle_result(release_info) -> None:
@@ -1193,14 +1218,14 @@ class QtMainWindow(QMainWindow):
         )
 
     def _open_library_profiles(self) -> None:
-        dialog = LibraryProfilesDialog(self.viewmodel.controller.list_library_profiles(), self)
+        dialog = LibraryProfilesDialog(self.viewmodel.list_library_profiles(), self)
         if dialog.exec() == 0 or not dialog.action_payload:
             return
         payload = dialog.action_payload
         action = payload.get("action")
         if action == "create":
             try:
-                created = self.viewmodel.controller.create_library_profile(str(payload["name"]))
+                created = self.viewmodel.create_library_profile(str(payload["name"]))
             except ValueError as exc:
                 QMessageBox.warning(self, "新建文库", str(exc))
                 return
@@ -1209,7 +1234,7 @@ class QtMainWindow(QMainWindow):
             return
         if action == "switch":
             try:
-                summary = self.viewmodel.controller.switch_library_profile(str(payload["name"]))
+                summary = self.viewmodel.switch_library_profile(str(payload["name"]))
             except ValueError as exc:
                 QMessageBox.warning(self, "切换文库", str(exc))
                 return
@@ -1218,7 +1243,7 @@ class QtMainWindow(QMainWindow):
             return
         if action == "archive":
             try:
-                summary = self.viewmodel.controller.set_library_archived(
+                summary = self.viewmodel.set_library_archived(
                     str(payload["name"]),
                     bool(payload["archived"]),
                 )
@@ -1232,7 +1257,7 @@ class QtMainWindow(QMainWindow):
 
     def _run_selected_pdf_ocr(self) -> None:
         preserve_id = self._current_literature_id
-        if not has_ocr_config(self.viewmodel.controller.settings):
+        if not has_ocr_config(self.viewmodel.settings):
             self._show_toast(
                 "OCR 提取",
                 "请先在“设置”中选择或下载安装 Umi-OCR，然后再执行扫描版 PDF 识别。",
@@ -1242,11 +1267,11 @@ class QtMainWindow(QMainWindow):
             return
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("OCR 提取", "请至少选择一条文献记录。", level="warning")
+            self._show_select_literature_toast("OCR 提取")
             return
         attachment_ids: list[int] = []
         for literature_id in literature_ids:
-            detail = self.viewmodel.controller.get_literature(literature_id)
+            detail = self.viewmodel.detail_payload(literature_id)
             if not detail:
                 continue
             for attachment in detail.get("attachments", []):
@@ -1278,7 +1303,7 @@ class QtMainWindow(QMainWindow):
         if self._current_literature_id is None:
             return
         literature_id = self._current_literature_id
-        detail = self.viewmodel.controller.get_literature(literature_id)
+        detail = self.viewmodel.detail_payload(literature_id)
         if not detail:
             return
         manual_identifier = ""
@@ -1303,7 +1328,7 @@ class QtMainWindow(QMainWindow):
             preview = MetadataPreviewDialog(payload, self)
             if preview.exec() == 0:
                 return
-            merged = self.viewmodel.controller.apply_metadata_payload(literature_id, payload)
+            merged = self.viewmodel.apply_metadata_payload(literature_id, payload)
             if merged is None:
                 return
             self._refresh_after_library_change(
@@ -1325,7 +1350,7 @@ class QtMainWindow(QMainWindow):
 
     def _open_import_center(self) -> None:
         preserve_id = self._current_literature_id
-        dialog = ImportCenterDialog(self.viewmodel.controller.settings, self)
+        dialog = ImportCenterDialog(self.viewmodel.settings, self)
         if dialog.exec() == 0:
             return
         payload = dialog.payload()
@@ -1353,7 +1378,7 @@ class QtMainWindow(QMainWindow):
         )
 
     def _open_search_center(self) -> None:
-        dialog = SearchDialog(self.viewmodel.controller, self)
+        dialog = SearchDialog(self.viewmodel.search_literatures, self)
         if dialog.exec() == 0 or dialog.selected_literature_id is None:
             return
         self.search_bar.line_edit.clear()
@@ -1366,9 +1391,9 @@ class QtMainWindow(QMainWindow):
     def _export_selected_csl(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("导出 CSL", "请至少选择一条文献记录。", level="warning")
+            self._show_select_literature_toast("导出 CSL")
             return
-        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        initial_dir = self.viewmodel.settings.recent_export_dir or str(Path.cwd())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出 CSL JSON",
@@ -1377,15 +1402,15 @@ class QtMainWindow(QMainWindow):
         )
         if not path:
             return
-        count = self.viewmodel.controller.export_csl_json(literature_ids, path)
-        self._show_toast("导出完成", f"已导出 {count} 条记录到 `{path}`。", level="success")
+        count = self.viewmodel.export_csl_json(literature_ids, path)
+        self._show_export_success_toast(count, path)
 
     def _copy_gbt_reference(self) -> None:
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("复制 GB/T", "请至少选择一条文献记录。", level="warning")
+            self._show_select_literature_toast("复制 GB/T")
             return
-        references = self.viewmodel.controller.build_gbt_references(literature_ids)
+        references = self.viewmodel.build_gbt_references(literature_ids)
         text = "\n".join(reference for reference in references if reference)
         if not text.strip():
             self._show_toast("复制 GB/T", "未生成可用的参考文献。", level="warning")
@@ -1397,7 +1422,7 @@ class QtMainWindow(QMainWindow):
         preserve_id = self._current_literature_id
         literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
         if not literature_ids:
-            self._show_toast("PDF 重命名", "请至少选择一条文献记录。", level="warning")
+            self._show_select_literature_toast("PDF 重命名")
             return
 
         def preview_task(controller):
@@ -1476,12 +1501,12 @@ class QtMainWindow(QMainWindow):
         )
 
     def _show_statistics_dialog(self) -> None:
-        dialog = StatisticsDialog(self.viewmodel.controller.get_statistics(), self)
+        dialog = StatisticsDialog(self.viewmodel.get_statistics(), self)
         if dialog.exec() == 0 or not dialog.export_template_key:
             return
         template_key = dialog.export_template_key
-        suffix = self.viewmodel.controller.suggested_export_extension(template_key)
-        initial_dir = self.viewmodel.controller.settings.recent_export_dir or str(Path.cwd())
+        suffix = self.viewmodel.suggested_export_extension(template_key)
+        initial_dir = self.viewmodel.settings.recent_export_dir or str(Path.cwd())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出统计报表",
@@ -1490,8 +1515,8 @@ class QtMainWindow(QMainWindow):
         )
         if not path:
             return
-        export_path = self.viewmodel.controller.export_statistics(template_key, path)
-        self._show_toast("统计报表已导出", f"文件已保存到 `{export_path}`。", level="success")
+        export_path = self.viewmodel.export_statistics(template_key, path)
+        self._show_file_saved_toast("统计报表已导出", export_path)
 
     def _open_maintenance_center(self) -> None:
         if self._maintenance_dialog is None:
@@ -1647,7 +1672,7 @@ class QtMainWindow(QMainWindow):
         if not selected:
             return
         try:
-            note_id = self.viewmodel.controller.save_note(
+            note_id = self.viewmodel.save_note(
                 literature_id=self._current_literature_id,
                 title=Path(selected).stem,
                 content="",
@@ -1655,7 +1680,7 @@ class QtMainWindow(QMainWindow):
                 note_type="file",
                 note_format=detect_note_format(selected),
                 external_file_path=selected,
-                import_mode=self.viewmodel.controller.settings.default_import_mode,
+                import_mode=self.viewmodel.settings.default_import_mode,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "关联笔记文件", str(exc))
@@ -1670,7 +1695,7 @@ class QtMainWindow(QMainWindow):
             return
         title = self.note_title_edit.text().strip() or "未命名笔记"
         content = self.note_body_edit.toPlainText()
-        note_id = self.viewmodel.controller.save_note(
+        note_id = self.viewmodel.save_note(
             literature_id=self._current_literature_id,
             title=title,
             content=content,
@@ -1703,7 +1728,7 @@ class QtMainWindow(QMainWindow):
             answer = QMessageBox.question(self, "删除笔记", "确认删除当前笔记吗？")
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        self.viewmodel.controller.delete_note(self._current_note_id, delete_file=delete_file)
+        self.viewmodel.delete_note(self._current_note_id, delete_file=delete_file)
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
         self._show_detail(self._current_literature_id)
@@ -1728,11 +1753,11 @@ class QtMainWindow(QMainWindow):
         )
         if not files:
             return
-        dialog = AttachmentDialog(self.viewmodel.controller.settings, self)
+        dialog = AttachmentDialog(self.viewmodel.settings, self)
         if dialog.exec() == 0:
             return
         try:
-            created_ids = self.viewmodel.controller.add_attachments(
+            created_ids = self.viewmodel.add_attachments(
                 self._current_literature_id,
                 files,
                 **dialog.value(),
@@ -1754,7 +1779,7 @@ class QtMainWindow(QMainWindow):
             return
         preferred_app = ""
         if str(attachment.get("resolved_path", "")).lower().endswith(".pdf"):
-            preferred_app = self.viewmodel.controller.settings.pdf_reader_path
+            preferred_app = self.viewmodel.settings.pdf_reader_path
         try:
             open_path(str(attachment["resolved_path"]), preferred_app=preferred_app)
         except FileNotFoundError:
@@ -1786,7 +1811,7 @@ class QtMainWindow(QMainWindow):
         )
         if answer == QMessageBox.StandardButton.Cancel:
             return
-        self.viewmodel.controller.delete_attachment(
+        self.viewmodel.delete_attachment(
             self._current_attachment_id,
             delete_file=answer == QMessageBox.StandardButton.Yes,
         )
@@ -1912,11 +1937,13 @@ class QtMainWindow(QMainWindow):
         self.summary_edit.setPlainText(detail.get("summary", "") or "")
         self.abstract_edit.setPlainText(detail.get("abstract", "") or "")
         self.remarks_edit.setPlainText(detail.get("remarks", "") or "")
+        self._metadata_snapshot = self.viewmodel.normalize_metadata_payload(detail)
         self.metadata_save_label.setText("已保存")
         self._loading_metadata = False
 
     def _clear_metadata_fields(self) -> None:
         self._loading_metadata = True
+        self.entry_type_combo.setCurrentIndex(0)
         self.title_edit.clear()
         self.translated_title_edit.clear()
         self.authors_edit.clear()
@@ -1925,6 +1952,7 @@ class QtMainWindow(QMainWindow):
         self.subject_edit.clear()
         self.keywords_edit.clear()
         self.tags_edit.clear()
+        self.reading_status_combo.setCurrentIndex(0)
         self.rating_spin.setValue(0)
         self.publication_title_edit.clear()
         self.publisher_edit.clear()
@@ -1944,6 +1972,8 @@ class QtMainWindow(QMainWindow):
         self.summary_edit.clear()
         self.abstract_edit.clear()
         self.remarks_edit.clear()
+        self._metadata_snapshot = None
+        self.metadata_save_label.setText("已保存")
         self._loading_metadata = False
 
     def _load_notes(self, notes: list[dict], *, select_note_id: int | None = None) -> None:
@@ -1981,7 +2011,7 @@ class QtMainWindow(QMainWindow):
                 return
 
     def _populate_note_editor(self, note_id: int) -> None:
-        note = self.viewmodel.controller.get_note(note_id)
+        note = self.viewmodel.get_note(note_id)
         if not note:
             return
         self._current_note_id = note_id
@@ -2010,7 +2040,7 @@ class QtMainWindow(QMainWindow):
     def _selected_note_payload(self) -> dict | None:
         if self._current_note_id is None:
             return None
-        return self.viewmodel.controller.get_note(self._current_note_id)
+        return self.viewmodel.get_note(self._current_note_id)
 
     def _load_attachments(self, attachments: list[dict], *, select_attachment_id: int | None = None) -> None:
         self.attachments_list.clear()
@@ -2044,7 +2074,7 @@ class QtMainWindow(QMainWindow):
     def _selected_attachment_payload(self) -> dict | None:
         if self._current_attachment_id is None:
             return None
-        return self.viewmodel.controller.get_attachment(self._current_attachment_id)
+        return self.viewmodel.get_attachment(self._current_attachment_id)
 
     def _selected_literature_ids(self) -> list[int]:
         ids: list[int] = []
@@ -2055,7 +2085,7 @@ class QtMainWindow(QMainWindow):
         return ids
     def _on_theme_changed(self) -> None:
         requested = str(self.theme_combo.currentData())
-        saved = self.viewmodel.controller.set_ui_theme(requested)
+        saved = self.viewmodel.set_ui_theme(requested)
         self._apply_theme(saved)
 
     def _apply_theme(self, requested: str) -> None:

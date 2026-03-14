@@ -3,8 +3,9 @@
 import json
 import shutil
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypeAlias, TypedDict
 
 from .metadata_service import extract_pdf_text
 from .ocr_service import extract_pdf_text_with_ocr
@@ -19,6 +20,116 @@ from .utils import (
     load_note_content,
     now_text,
 )
+
+SqlParam: TypeAlias = str | int | float | bytes | None
+
+
+class StatisticsBucket(TypedDict):
+    label: str
+    count: int
+
+
+class SearchResult(TypedDict, total=False):
+    id: int
+    title: str
+    year: int | None
+    entry_type: str
+    authors_display: str
+    summary_hit: str
+    notes_hit: str
+    attachment_hit: str
+
+
+class AttachmentRecord(TypedDict, total=False):
+    id: int
+    literature_id: int
+    label: str | None
+    role: str
+    language: str | None
+    file_path: str
+    is_relative: int
+    is_primary: int
+    original_name: str | None
+    file_size: int
+    checksum: str | None
+    extracted_text: str | None
+    text_extracted_at: str | None
+    created_at: str
+    resolved_path: str
+
+
+class NoteRecord(TypedDict, total=False):
+    id: int
+    literature_id: int
+    title: str
+    note_type: str
+    note_format: str
+    content: str
+    external_path: str | None
+    external_is_relative: int
+    created_at: str
+    updated_at: str
+    attachment_count: NotRequired[int]
+    attachment_ids: NotRequired[list[int]]
+    resolved_path: NotRequired[str]
+
+
+class LiteratureRecord(TypedDict, total=False):
+    id: int
+    entry_type: str
+    title: str
+    translated_title: str
+    publication_title: str
+    publisher: str
+    school: str
+    conference_name: str
+    standard_number: str
+    patent_number: str
+    year: int | None
+    month: str
+    volume: str
+    issue: str
+    pages: str
+    doi: str
+    isbn: str
+    url: str
+    language: str
+    country: str
+    subject: str
+    keywords: str
+    summary: str
+    abstract: str
+    reading_status: str
+    rating: int | None
+    remarks: str
+    cite_key: str
+    created_at: str
+    updated_at: str
+    authors: list[str]
+    tags: list[str]
+    attachments: list[AttachmentRecord]
+    notes: list[NoteRecord]
+    authors_display: NotRequired[str]
+    attachment_count: NotRequired[int]
+    tags_display: NotRequired[str]
+    note_count: NotRequired[int]
+
+
+class StatisticsPayload(TypedDict):
+    total_literatures: int
+    total_attachments: int
+    total_notes: int
+    by_year: list[StatisticsBucket]
+    by_subject: list[StatisticsBucket]
+    by_status: list[StatisticsBucket]
+
+
+class RenamePreview(TypedDict):
+    attachment_id: int
+    literature_id: int
+    old_path: str
+    new_path: str
+    changed: bool
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -64,6 +175,15 @@ CREATE TABLE IF NOT EXISTS literatures (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_literatures_cite_key
     ON literatures(cite_key)
     WHERE cite_key IS NOT NULL AND cite_key <> '';
+
+CREATE INDEX IF NOT EXISTS idx_literatures_year
+    ON literatures(year);
+
+CREATE INDEX IF NOT EXISTS idx_literatures_subject
+    ON literatures(subject);
+
+CREATE INDEX IF NOT EXISTS idx_literatures_reading_status
+    ON literatures(reading_status);
 
 CREATE TABLE IF NOT EXISTS authors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,6 +320,7 @@ class LibraryDatabase:
         self._settings_getter = settings_getter
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(SCHEMA)
         self._apply_migrations()
@@ -231,10 +352,10 @@ class LibraryDatabase:
             "literature_id UNINDEXED, title, translated_title, authors, subject, keywords, summary, abstract, notes_text, attachments_text)"
         )
 
-    def _fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:
+    def _fetchone(self, sql: str, params: tuple[SqlParam, ...] = ()) -> sqlite3.Row | None:
         return self.connection.execute(sql, params).fetchone()
 
-    def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
+    def _fetchall(self, sql: str, params: tuple[SqlParam, ...] = ()) -> list[sqlite3.Row]:
         return self.connection.execute(sql, params).fetchall()
 
     def set_setting(self, key: str, value: str) -> None:
@@ -298,7 +419,7 @@ class LibraryDatabase:
             ),
         )
 
-    def search_literatures(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
+    def search_literatures(self, query: str, limit: int = 100) -> list[SearchResult]:
         text = (query or "").strip()
         if not text:
             return []
@@ -325,7 +446,7 @@ class LibraryDatabase:
             )
             return [dict(row) for row in fallback]
 
-    def get_statistics(self) -> dict[str, Any]:
+    def get_statistics(self) -> StatisticsPayload:
         total = self._fetchone("SELECT COUNT(*) AS count FROM literatures")["count"]
         attachments = self._fetchone("SELECT COUNT(*) AS count FROM attachments")["count"]
         notes = self._fetchone("SELECT COUNT(*) AS count FROM notes")["count"]
@@ -394,9 +515,9 @@ class LibraryDatabase:
         reading_status: str = "",
         min_rating: int = 0,
         created_after: str = "",
-    ) -> list[dict[str, Any]]:
+    ) -> list[LiteratureRecord]:
         clauses = ["1 = 1"]
-        params: list[Any] = []
+        params: list[SqlParam] = []
         if search:
             like = f"%{search}%"
             clauses.append(
@@ -433,6 +554,16 @@ class LibraryDatabase:
             params.append(created_after)
 
         sql = f"""
+            WITH attachment_counts AS (
+                SELECT literature_id, COUNT(*) AS attachment_count
+                FROM attachments
+                GROUP BY literature_id
+            ),
+            note_counts AS (
+                SELECT literature_id, COUNT(*) AS note_count
+                FROM notes
+                GROUP BY literature_id
+            )
             SELECT
                 l.*,
                 COALESCE((
@@ -442,21 +573,23 @@ class LibraryDatabase:
                     WHERE la.literature_id = l.id
                     ORDER BY la.author_order
                 ), '') AS authors_display,
-                COALESCE((SELECT COUNT(*) FROM attachments att WHERE att.literature_id = l.id), 0) AS attachment_count,
+                COALESCE(ac.attachment_count, 0) AS attachment_count,
                 COALESCE((
                     SELECT GROUP_CONCAT(t.name, ', ')
                     FROM literature_tags lt
                     JOIN tags t ON t.id = lt.tag_id
                     WHERE lt.literature_id = l.id
                 ), '') AS tags_display,
-                COALESCE((SELECT COUNT(*) FROM notes n WHERE n.literature_id = l.id), 0) AS note_count
+                COALESCE(nc.note_count, 0) AS note_count
             FROM literatures l
+            LEFT JOIN attachment_counts ac ON ac.literature_id = l.id
+            LEFT JOIN note_counts nc ON nc.literature_id = l.id
             WHERE {' AND '.join(clauses)}
             ORDER BY COALESCE(l.year, 0) DESC, l.updated_at DESC, l.id DESC
         """
         return [dict(row) for row in self._fetchall(sql, tuple(params))]
 
-    def get_literature(self, literature_id: int) -> dict[str, Any] | None:
+    def get_literature(self, literature_id: int) -> LiteratureRecord | None:
         row = self._fetchone("SELECT * FROM literatures WHERE id = ?", (literature_id,))
         if not row:
             return None
@@ -485,7 +618,7 @@ class LibraryDatabase:
         )
         return [row[0] for row in rows]
 
-    def save_literature(self, payload: dict[str, Any]) -> int:
+    def save_literature(self, payload: LiteratureRecord) -> int:
         data = {column: payload.get(column) for column in LITERATURE_COLUMNS}
         authors = payload.get("authors", [])
         tags = payload.get("tags", [])
@@ -678,19 +811,19 @@ class LibraryDatabase:
         self.connection.commit()
         return created_ids
 
-    def get_attachments(self, literature_id: int) -> list[dict[str, Any]]:
+    def get_attachments(self, literature_id: int) -> list[AttachmentRecord]:
         rows = self._fetchall(
             "SELECT * FROM attachments WHERE literature_id = ? ORDER BY is_primary DESC, created_at DESC, id DESC",
             (literature_id,),
         )
-        items = []
+        items: list[AttachmentRecord] = []
         for row in rows:
             payload = dict(row)
             payload["resolved_path"] = str(self.resolve_path(payload["file_path"], payload["is_relative"]))
             items.append(payload)
         return items
 
-    def get_attachment(self, attachment_id: int) -> dict[str, Any] | None:
+    def get_attachment(self, attachment_id: int) -> AttachmentRecord | None:
         row = self._fetchone("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
         if not row:
             return None
@@ -712,7 +845,7 @@ class LibraryDatabase:
 
     def _prepare_note_file_storage(
         self,
-        literature: dict[str, Any],
+        literature: LiteratureRecord,
         file_path: str,
         import_mode: str,
     ) -> tuple[str, int, str, str]:
@@ -738,13 +871,13 @@ class LibraryDatabase:
         stored_path, is_relative = self._store_path(final_path)
         return stored_path, is_relative, final_path.name, final_path.suffix.lower()
 
-    def list_notes(self, literature_id: int) -> list[dict[str, Any]]:
+    def list_notes(self, literature_id: int) -> list[NoteRecord]:
         rows = self._fetchall(
             "SELECT n.*, COALESCE((SELECT COUNT(*) FROM note_attachment_links nal WHERE nal.note_id = n.id), 0) AS attachment_count "
             "FROM notes n WHERE n.literature_id = ? ORDER BY n.updated_at DESC",
             (literature_id,),
         )
-        items: list[dict[str, Any]] = []
+        items: list[NoteRecord] = []
         for row in rows:
             payload = dict(row)
             if payload.get("external_path"):
@@ -754,7 +887,7 @@ class LibraryDatabase:
             items.append(payload)
         return items
 
-    def get_note(self, note_id: int) -> dict[str, Any] | None:
+    def get_note(self, note_id: int) -> NoteRecord | None:
         row = self._fetchone("SELECT * FROM notes WHERE id = ?", (note_id,))
         if not row:
             return None
@@ -844,7 +977,13 @@ class LibraryDatabase:
             self.refresh_search_index_for_literature(int(note["literature_id"]))
             self.connection.commit()
 
-    def record_import_history(self, source_path: str, source_kind: str, literature_id: int, metadata: dict[str, Any]) -> None:
+    def record_import_history(
+        self,
+        source_path: str,
+        source_kind: str,
+        literature_id: int,
+        metadata: Mapping[str, object],
+    ) -> None:
         self.connection.execute(
             "INSERT INTO import_history(source_path, source_kind, literature_id, metadata_json, imported_at) VALUES(?, ?, ?, ?, ?)",
             (source_path, source_kind, literature_id, json.dumps(metadata, ensure_ascii=False), now_text()),
@@ -856,7 +995,7 @@ class LibraryDatabase:
         primary_literature_id: int,
         merged_literature_id: int,
         merge_reason: str,
-        details: dict[str, Any],
+        details: Mapping[str, object],
     ) -> None:
         self.connection.execute(
             "INSERT INTO merge_history(primary_literature_id, merged_literature_id, merge_reason, details_json, merged_at) VALUES(?, ?, ?, ?, ?)",
@@ -870,14 +1009,14 @@ class LibraryDatabase:
         Path(destination).write_text(build_bibtex(entries), encoding="utf-8")
         return len(entries)
 
-    def _build_bib_payload(self, literature_id: int) -> dict[str, Any] | None:
+    def _build_bib_payload(self, literature_id: int) -> LiteratureRecord | None:
         literature = self.get_literature(literature_id)
         if not literature:
             return None
         return {key: literature.get(key) for key in LITERATURE_COLUMNS} | {"authors": literature.get("authors", [])}
 
-    def preview_pdf_renames(self, literature_ids: list[int]) -> list[dict[str, Any]]:
-        previews: list[dict[str, Any]] = []
+    def preview_pdf_renames(self, literature_ids: list[int]) -> list[RenamePreview]:
+        previews: list[RenamePreview] = []
         reserved_targets: set[str] = set()
         for literature_id in literature_ids:
             literature = self.get_literature(literature_id)
@@ -914,7 +1053,7 @@ class LibraryDatabase:
                 )
         return previews
 
-    def apply_pdf_renames(self, previews: list[dict[str, Any]]) -> int:
+    def apply_pdf_renames(self, previews: list[RenamePreview]) -> int:
         renamed = 0
         for preview in previews:
             old_path = Path(preview["old_path"])

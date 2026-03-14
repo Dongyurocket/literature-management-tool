@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 
+@dataclass(slots=True)
+class WorkerError:
+    message: str
+    exception_type: str
+    traceback_text: str
+
+
 class WorkerSignals(QObject):
     result = Signal(object)
-    error = Signal(str)
+    error = Signal(object)
     finished = Signal()
 
 
 class AsyncWorker(QRunnable):
-    def __init__(self, task: Callable[[], Any]) -> None:
+    def __init__(self, task: Callable[[], object]) -> None:
         super().__init__()
         self.task = task
         self.signals = WorkerSignals()
@@ -22,8 +30,14 @@ class AsyncWorker(QRunnable):
     def run(self) -> None:
         try:
             result = self.task()
-        except Exception:
-            self.signals.error.emit(traceback.format_exc())
+        except Exception as exc:
+            self.signals.error.emit(
+                WorkerError(
+                    message=str(exc) or exc.__class__.__name__,
+                    exception_type=exc.__class__.__name__,
+                    traceback_text=traceback.format_exc(),
+                )
+            )
         else:
             self.signals.result.emit(result)
         finally:

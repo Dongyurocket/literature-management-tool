@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -28,7 +29,6 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppSettings
-from ...controllers import LibraryController
 from ...dedupe_service import COMPARE_FIELDS, build_merge_preview
 from ...import_service import scan_import_sources
 from ...utils import ENTRY_TYPE_LABELS, IMPORT_MODE_LABELS
@@ -277,9 +277,9 @@ class DuplicateDialog(QDialog):
 
 
 class SearchDialog(QDialog):
-    def __init__(self, controller: LibraryController, parent=None) -> None:
+    def __init__(self, search_literatures: Callable[[str], list[dict[str, object]]], parent=None) -> None:
         super().__init__(parent)
-        self.controller = controller
+        self._search_literatures = search_literatures
         self.selected_literature_id: int | None = None
         self.setWindowTitle("全文检索")
         self.resize(980, 620)
@@ -312,7 +312,7 @@ class SearchDialog(QDialog):
         layout.addWidget(buttons)
 
     def _search(self) -> None:
-        rows = self.controller.search_literatures(self.query_edit.text().strip())
+        rows = self._search_literatures(self.query_edit.text().strip())
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             values = [

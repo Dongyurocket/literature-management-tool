@@ -11,11 +11,12 @@ import uuid
 from pathlib import Path
 from urllib import error, request
 
+from . import __version__
 from .config import AppSettings, DEFAULT_UMI_OCR_REPO, resolve_tools_dir
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/{repo}/releases/latest"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.2",
+    "User-Agent": f"LiteratureManagementTool/{__version__}",
     "Accept": "application/vnd.github+json",
 }
 DEFAULT_UMI_PORT = 1224

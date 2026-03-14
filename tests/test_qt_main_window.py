@@ -221,6 +221,25 @@ class QtMainWindowMetadataTests(unittest.TestCase):
                 detail = window.viewmodel.controller.get_literature(literature_id)
                 self.assertEqual(detail.get("cite_key"), "ManualKey2026")
 
+    def test_unchanged_metadata_does_not_trigger_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                literature_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "脏检查测试",
+                        "authors": ["张三"],
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
+                window._show_detail(literature_id)
+
+                with mock.patch.object(window.viewmodel, "save_metadata", wraps=window.viewmodel.save_metadata) as save_metadata:
+                    window._save_metadata_changes()
+
+                self.assertFalse(save_metadata.called)
+
 
 class SettingsDialogMetadataSourceTests(unittest.TestCase):
     def test_metadata_source_is_single_select(self):

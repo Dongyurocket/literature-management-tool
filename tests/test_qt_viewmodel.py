@@ -27,6 +27,30 @@ def build_controller(root: Path):
 
 
 class MainWindowViewModelTests(unittest.TestCase):
+    def test_create_save_and_delete_literature_routes_through_viewmodel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                viewmodel = MainWindowViewModel(controller)
+
+                literature_id = viewmodel.create_new_literature()
+                saved = viewmodel.save_metadata(
+                    literature_id,
+                    {
+                        "title": "  视图模型保存测试  ",
+                        "authors": ["张三", "李四"],
+                        "year": "2026",
+                        "reading_status": "在读",
+                    },
+                )
+
+                self.assertEqual(saved["title"], "视图模型保存测试")
+                self.assertEqual(saved["authors"], ["张三", "李四"])
+                self.assertEqual(saved["year"], 2026)
+                self.assertEqual(saved["reading_status"], "在读")
+
+                viewmodel.delete_literature(literature_id)
+                self.assertEqual(viewmodel.detail_payload(literature_id), {})
+
     def test_navigation_sections_include_dynamic_subjects_and_tags(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_controller(Path(tmp)) as controller:

@@ -7,11 +7,12 @@ from html import unescape
 from pathlib import Path
 from urllib import error, parse, request
 
+from . import __version__
 
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
 GITHUB_RELEASES_LATEST = "https://github.com/{repo}/releases/latest"
 HTTP_HEADERS = {
-    "User-Agent": "LiteratureManagementTool/0.3.3",
+    "User-Agent": f"LiteratureManagementTool/{__version__}",
     "Accept": "application/vnd.github+json",
 }
 

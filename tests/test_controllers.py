@@ -7,6 +7,7 @@ from unittest import mock
 
 from literature_manager.config import AppSettings, SettingsStore
 from literature_manager.controllers import LibraryController
+from literature_manager.utils import now_text
 
 
 @contextmanager
@@ -27,6 +28,48 @@ def build_controller(root: Path):
 
 
 class LibraryControllerTests(unittest.TestCase):
+    def test_database_enables_wal_and_list_counts_use_joined_aggregates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                literature_id = controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "数据库优化测试",
+                        "year": 2026,
+                        "subject": "Database Systems",
+                        "reading_status": "在读",
+                        "authors": ["Alice"],
+                        "tags": ["wal"],
+                    }
+                )
+
+                controller.database.connection.execute(
+                    "INSERT INTO attachments(literature_id, label, role, language, file_path, is_relative, is_primary, created_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    (literature_id, "paper.pdf", "source", "zh", "/tmp/paper.pdf", 0, 1, now_text()),
+                )
+                controller.database.connection.execute(
+                    "INSERT INTO notes(literature_id, title, note_type, note_format, content, created_at, updated_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    (literature_id, "Reading Notes", "text", "markdown", "summary", now_text(), now_text()),
+                )
+                controller.database.connection.commit()
+
+                mode = controller.database.connection.execute("PRAGMA journal_mode").fetchone()[0]
+                index_names = {
+                    row[1]
+                    for row in controller.database.connection.execute("PRAGMA index_list(literatures)").fetchall()
+                }
+                rows = controller.list_literatures(subject="Database Systems", reading_status="在读")
+
+                self.assertEqual(str(mode).lower(), "wal")
+                self.assertTrue(
+                    {"idx_literatures_year", "idx_literatures_subject", "idx_literatures_reading_status"}.issubset(index_names)
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["attachment_count"], 1)
+                self.assertEqual(rows[0]["note_count"], 1)
+
     def test_merge_metadata_payload_appends_new_tags_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_controller(Path(tmp)) as controller:
