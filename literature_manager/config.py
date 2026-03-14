@@ -15,6 +15,7 @@ class AppSettings:
     default_import_mode: str = "copy"
     recent_export_dir: str = ""
     pdf_reader_path: str = ""
+    ui_theme: str = "system"
 
 
 class SettingsStore:

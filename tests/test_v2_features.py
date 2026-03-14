@@ -26,10 +26,14 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict("os.environ", {"LITERATURE_MANAGER_HOME": tmp}):
                 store = SettingsStore()
-                settings = AppSettings(pdf_reader_path=r"C:\Apps\Reader\reader.exe")
+                settings = AppSettings(
+                    pdf_reader_path=r"C:\Apps\Reader\reader.exe",
+                    ui_theme="dark",
+                )
                 store.save(settings)
                 loaded = store.load()
                 self.assertEqual(loaded.pdf_reader_path, settings.pdf_reader_path)
+                self.assertEqual(loaded.ui_theme, "dark")
 
 
 class NoteFeatureTests(unittest.TestCase):
@@ -79,6 +83,33 @@ class NoteFeatureTests(unittest.TestCase):
             self.assertEqual(note["note_type"], "file")
             self.assertEqual(note["note_format"], "docx")
             self.assertEqual(Path(note["resolved_path"]), note_path.resolve())
+            db.close()
+
+    def test_database_preserves_markdown_text_note_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = LibraryDatabase(root / "library.sqlite3", lambda: str(root / "library"))
+            literature_id = db.save_literature(
+                {
+                    "entry_type": "journal_article",
+                    "title": "Markdown Note",
+                    "authors": ["张三"],
+                    "tags": [],
+                }
+            )
+
+            note_id = db.save_note(
+                literature_id=literature_id,
+                title="研究记录",
+                content="# Heading",
+                attachment_ids=[],
+                note_type="text",
+                note_format="markdown",
+            )
+
+            note = db.get_note(note_id)
+            self.assertEqual(note["note_type"], "text")
+            self.assertEqual(note["note_format"], "markdown")
             db.close()
 
 

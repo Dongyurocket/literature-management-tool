@@ -349,7 +349,19 @@ class LibraryDatabase:
         entry_types = [row[0] for row in self._fetchall(
             "SELECT DISTINCT entry_type FROM literatures ORDER BY entry_type"
         )]
-        return {"subjects": subjects, "years": years, "entry_types": entry_types}
+        tags = [row[0] for row in self._fetchall(
+            "SELECT DISTINCT name FROM tags ORDER BY name"
+        )]
+        statuses = [row[0] for row in self._fetchall(
+            "SELECT DISTINCT reading_status FROM literatures WHERE reading_status IS NOT NULL AND reading_status <> '' ORDER BY reading_status"
+        )]
+        return {
+            "subjects": subjects,
+            "years": years,
+            "entry_types": entry_types,
+            "tags": tags,
+            "reading_statuses": statuses,
+        }
 
     def list_literatures(
         self,
@@ -358,6 +370,10 @@ class LibraryDatabase:
         subject: str = "",
         year: str = "",
         entry_type: str = "",
+        tag: str = "",
+        reading_status: str = "",
+        min_rating: int = 0,
+        created_after: str = "",
     ) -> list[dict[str, Any]]:
         clauses = ["1 = 1"]
         params: list[Any] = []
@@ -380,6 +396,21 @@ class LibraryDatabase:
         if entry_type:
             clauses.append("l.entry_type = ?")
             params.append(entry_type)
+        if tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM literature_tags lt JOIN tags t ON t.id = lt.tag_id "
+                "WHERE lt.literature_id = l.id AND t.name = ?)"
+            )
+            params.append(tag)
+        if reading_status:
+            clauses.append("COALESCE(l.reading_status, '') = ?")
+            params.append(reading_status)
+        if min_rating > 0:
+            clauses.append("COALESCE(l.rating, 0) >= ?")
+            params.append(min_rating)
+        if created_after:
+            clauses.append("l.created_at >= ?")
+            params.append(created_after)
 
         sql = f"""
             SELECT
@@ -741,7 +772,7 @@ class LibraryDatabase:
                 raise ValueError("请选择要关联的笔记文件。")
             content = content or ""
         else:
-            note_format = "text"
+            note_format = note_format or "text"
 
         if note_id:
             self.connection.execute(

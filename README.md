@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 
-一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + tkinter + sqlite3 + pypdf` 构建，默认本地存储，不依赖服务器即可运行。
+一个面向本地资料管理场景的桌面文献管理软件，适合研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。项目使用 `Python + PySide6 + sqlite3 + pypdf` 构建，默认本地存储，不依赖服务器即可运行。
 
 仓库地址：[GitHub](https://github.com/Dongyurocket/literature-management-tool)  
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)
@@ -160,7 +160,7 @@ V2 已支持：
 
 ```bash
 python -m pip install -U pip
-python -m pip install pypdf
+python -m pip install .
 ```
 
 启动程序：
@@ -259,7 +259,6 @@ literature-management-tool/
 |  |- import_service.py
 |  |- maintenance_service.py
 |  |- metadata_service.py
-|  |- ui.py
 |  |- utils.py
 |- installer/
 |  |- LiteratureManagementTool.iss

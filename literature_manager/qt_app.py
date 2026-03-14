@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+import sys
+
+from .config import SettingsStore
+from .controllers import LibraryController
+from .viewmodels import MainWindowViewModel
+
+
+def main() -> int:
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+    except ImportError as exc:
+        raise RuntimeError("PySide6 is not installed. Run `python -m pip install .`.") from exc
+    from .views import QtMainWindow
+    from .views.theme import apply_theme
+
+    if hasattr(QApplication, "setHighDpiScaleFactorRoundingPolicy"):
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("Literature management tool")
+    settings_store = SettingsStore()
+    settings = settings_store.load()
+    controller = LibraryController(settings_store, settings)
+    apply_theme(app, settings.ui_theme)
+
+    window = QtMainWindow(MainWindowViewModel(controller))
+    window.show()
+    exit_code = app.exec()
+    controller.close()
+    return exit_code

@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLineEdit,
+    QVBoxLayout,
+)
+
+from ...config import AppSettings
+from ...utils import IMPORT_MODE_LABELS, ROLE_LABELS
+
+
+class AttachmentDialog(QDialog):
+    def __init__(self, settings: AppSettings, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Attachments")
+        self.resize(420, 220)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.role_combo = QComboBox(self)
+        for code, label in ROLE_LABELS.items():
+            self.role_combo.addItem(label, code)
+        form.addRow("Role", self.role_combo)
+
+        self.language_edit = QLineEdit(self)
+        form.addRow("Language", self.language_edit)
+
+        self.import_mode_combo = QComboBox(self)
+        for code, label in IMPORT_MODE_LABELS.items():
+            self.import_mode_combo.addItem(label, code)
+        self.import_mode_combo.setCurrentIndex(
+            max(0, self.import_mode_combo.findData(settings.default_import_mode))
+        )
+        form.addRow("Import Mode", self.import_mode_combo)
+
+        self.primary_check = QCheckBox("Mark as primary attachment", self)
+        self.primary_check.setChecked(True)
+        form.addRow("", self.primary_check)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def value(self) -> dict[str, object]:
+        return {
+            "role": str(self.role_combo.currentData()),
+            "language": self.language_edit.text().strip(),
+            "import_mode": str(self.import_mode_combo.currentData()),
+            "is_primary": self.primary_check.isChecked(),
+        }

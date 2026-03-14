@@ -14,6 +14,12 @@ ROLE_LABELS = {
     "supplement": "补充",
 }
 
+IMPORT_MODE_LABELS = {
+    "copy": "复制到库",
+    "move": "移动到库",
+    "link": "仅关联外部文件",
+}
+
 NOTE_FORMAT_LABELS = {
     "text": "文本",
     "markdown": "Markdown",
@@ -44,6 +50,8 @@ ENTRY_TYPE_TO_BIB = {
     "webpage": "online",
     "misc": "misc",
 }
+
+READING_STATUSES = ["未开始", "在读", "已读", "搁置"]
 
 
 def now_text() -> str:
