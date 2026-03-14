@@ -240,21 +240,31 @@ class QtMainWindow(QMainWindow):
         error_title: str = "操作失败",
     ) -> None:
         task_token = self._begin_busy_task(label)
+        task_closed = False
         worker = AsyncWorker(task)
 
+        def close_busy_once() -> None:
+            nonlocal task_closed
+            if task_closed:
+                return
+            task_closed = True
+            self._end_busy_task(task_token)
+
         def handle_result(result) -> None:
+            close_busy_once()
             self._run_ui_callback(on_result, result, error_title=error_title)
             if success_toast is not None:
                 self._show_toast(success_toast[0], success_toast[1], level="success")
 
         def handle_error(error_text: str) -> None:
+            close_busy_once()
             self._show_toast(error_title, self._error_summary(error_text), level="error", duration_ms=5200)
 
         def handle_finished() -> None:
             try:
                 self._run_ui_callback(on_finished, error_title=error_title)
             finally:
-                self._end_busy_task(task_token)
+                close_busy_once()
 
         worker.signals.result.connect(handle_result)
         worker.signals.error.connect(handle_error)

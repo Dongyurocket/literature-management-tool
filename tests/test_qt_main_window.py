@@ -73,6 +73,24 @@ class QtMainWindowAsyncTests(unittest.TestCase):
                 self.assertEqual(window.busy_label.text(), "就绪")
                 self.assertNotIn("正在下载更新包", window.statusBar().currentMessage())
 
+    def test_busy_state_is_cleared_before_result_callback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                observed: dict[str, str] = {}
+
+                def capture_callback(_result) -> None:
+                    observed["busy_label"] = window.busy_label.text()
+                    observed["status_text"] = window.statusBar().currentMessage()
+
+                with run_async_immediately(window):
+                    window._run_async_task(
+                        label="正在检查 GitHub 更新…",
+                        task=lambda: {"ok": True},
+                        on_result=capture_callback,
+                    )
+                self.assertEqual(observed.get("busy_label"), "就绪")
+                self.assertNotIn("正在检查 GitHub 更新", observed.get("status_text", ""))
+
     def test_nested_busy_tasks_keep_latest_message_until_all_finish(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_window(Path(tmp)) as window:
