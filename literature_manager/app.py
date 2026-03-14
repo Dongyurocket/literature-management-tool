@@ -12,6 +12,7 @@ def main() -> None:
     settings_store = SettingsStore()
     settings = settings_store.load()
     database = LibraryDatabase(settings_store.database_path, lambda: settings.library_root)
+    database.rebuild_search_index()
 
     root = tk.Tk()
     style = ttk.Style(root)

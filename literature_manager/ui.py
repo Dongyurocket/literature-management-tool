@@ -1,18 +1,25 @@
 ﻿
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 from .config import AppSettings, SettingsStore
 from .db import LibraryDatabase
+from .dedupe_service import find_duplicate_groups, merge_literatures
+from .import_service import import_scanned_items, scan_import_sources
+from .maintenance_service import create_backup, find_missing_paths, repair_missing_paths, restore_backup
+from .metadata_service import lookup_doi, lookup_isbn
 from .utils import (
     ENTRY_TYPE_LABELS,
     ROLE_LABELS,
+    build_csl_entry,
     build_cite_key,
+    build_gbt_reference,
     detect_note_format,
     join_csv,
     load_note_preview,
@@ -476,6 +483,7 @@ class NoteFileDialog(BaseDialog):
 class SettingsDialog(BaseDialog):
     def __init__(self, parent: tk.Misc, settings: AppSettings) -> None:
         super().__init__(parent, "软件设置", "760x340")
+        self.original_settings = settings
         self.library_root_var = tk.StringVar(value=settings.library_root)
         self.import_mode_var = tk.StringVar(value=IMPORT_MODE_LABELS.get(settings.default_import_mode, "复制到库"))
         self.pdf_reader_var = tk.StringVar(value=settings.pdf_reader_path)
@@ -525,7 +533,7 @@ class SettingsDialog(BaseDialog):
         self.result = AppSettings(
             library_root=self.library_root_var.get().strip(),
             default_import_mode=IMPORT_MODE_BY_LABEL[self.import_mode_var.get()],
-            recent_export_dir="",
+            recent_export_dir=self.original_settings.recent_export_dir,
             pdf_reader_path=self.pdf_reader_var.get().strip(),
         )
         self.destroy()
@@ -562,6 +570,352 @@ class RenamePreviewDialog(BaseDialog):
         self.destroy()
 
 
+class MetadataPreviewDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, payload: dict) -> None:
+        super().__init__(parent, "元数据预览", "760x520")
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        text = scrolledtext.ScrolledText(frame, wrap="word")
+        text.grid(row=0, column=0, sticky="nsew")
+        preview_lines = [
+            f"标题：{payload.get('title', '')}",
+            f"作者：{' / '.join(payload.get('authors', []))}",
+            f"年份：{payload.get('year', '')}",
+            f"来源：{payload.get('publication_title', '')}",
+            f"出版社：{payload.get('publisher', '')}",
+            f"DOI：{payload.get('doi', '')}",
+            f"ISBN：{payload.get('isbn', '')}",
+            f"URL：{payload.get('url', '')}",
+            f"关键词：{payload.get('keywords', '')}",
+            "",
+            "摘要 / 简介：",
+            payload.get("abstract") or payload.get("summary", ""),
+        ]
+        text.insert("1.0", "\n".join(preview_lines).strip())
+        text.configure(state="disabled")
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=1, column=0, sticky="e", pady=(10, 0))
+        ttk.Button(buttons, text="取消", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(buttons, text="用缺失字段补全", command=self._submit).pack(side="right")
+
+    def _submit(self) -> None:
+        self.result = True
+        self.destroy()
+
+
+class ImportCenterDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, settings: AppSettings) -> None:
+        super().__init__(parent, "导入中心", "1100x620")
+        self.settings = settings
+        self.items: list[dict] = []
+        self.import_mode_var = tk.StringVar(value=IMPORT_MODE_LABELS.get(settings.default_import_mode, "复制到库"))
+        self.status_var = tk.StringVar(value="请选择文件或文件夹进行扫描。")
+
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(frame)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Button(toolbar, text="选择文件", command=self._pick_files).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="选择文件夹", command=self._pick_folder).pack(side="left", padx=(0, 12))
+        ttk.Label(toolbar, text="导入方式").pack(side="left")
+        ttk.Combobox(toolbar, textvariable=self.import_mode_var, values=list(IMPORT_MODE_LABELS.values()), state="readonly", width=12).pack(side="left", padx=(8, 0))
+
+        self.tree = ttk.Treeview(
+            frame,
+            columns=("kind", "title", "type", "authors", "year", "source"),
+            show="headings",
+            selectmode="extended",
+        )
+        for key, text, width in (
+            ("kind", "来源类型", 90),
+            ("title", "标题", 260),
+            ("type", "文献类型", 110),
+            ("authors", "作者", 180),
+            ("year", "年份", 70),
+            ("source", "源文件", 320),
+        ):
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width, anchor="w")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        scroll.grid(row=1, column=1, sticky="ns")
+        self.tree.config(yscrollcommand=scroll.set)
+
+        bottom = ttk.Frame(frame)
+        bottom.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(bottom, textvariable=self.status_var).pack(side="left")
+        ttk.Button(bottom, text="取消", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(bottom, text="导入选中项", command=self._submit).pack(side="right")
+
+    def _load_sources(self, paths: list[str]) -> None:
+        self.items = scan_import_sources(paths)
+        self.tree.delete(*self.tree.get_children())
+        for index, item in enumerate(self.items):
+            kind_label = {"reference_record": "Bib/RIS", "file_record": "PDF", "note_record": "笔记文件"}.get(item["kind"], item["kind"])
+            self.tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    kind_label,
+                    item["display_title"],
+                    entry_type_label(item.get("entry_type", "")),
+                    " / ".join(item.get("authors", [])),
+                    item.get("year") or "",
+                    item["source_path"],
+                ),
+            )
+        self.tree.selection_set(self.tree.get_children())
+        self.status_var.set(f"已扫描 {len(self.items)} 个可导入项。")
+
+    def _pick_files(self) -> None:
+        files = filedialog.askopenfilenames(
+            parent=self,
+            title="选择要导入的文件",
+            filetypes=[
+                ("支持的文件", "*.pdf *.bib *.ris *.docx *.md *.markdown *.txt"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if files:
+            self._load_sources(list(files))
+
+    def _pick_folder(self) -> None:
+        folder = filedialog.askdirectory(parent=self, title="选择要扫描的文件夹")
+        if folder:
+            self._load_sources([folder])
+
+    def _submit(self) -> None:
+        selected_indexes = {int(item_id) for item_id in self.tree.selection()}
+        for index, item in enumerate(self.items):
+            item["selected"] = index in selected_indexes
+        self.result = {
+            "items": self.items,
+            "import_mode": IMPORT_MODE_BY_LABEL[self.import_mode_var.get()],
+        }
+        self.destroy()
+
+
+class DuplicateDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, groups: list[dict]) -> None:
+        super().__init__(parent, "重复文献检测", "980x600")
+        self.groups = groups
+        self.current_group: dict | None = None
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(frame)
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
+        ttk.Label(left, text="重复组").pack(anchor="w")
+        self.group_list = tk.Listbox(left, exportselection=False, width=30, height=22)
+        self.group_list.pack(fill="both", expand=True, pady=(6, 0))
+        self.group_list.bind("<<ListboxSelect>>", self._on_group_selected)
+        for group in groups:
+            self.group_list.insert("end", f"{group['reason']} | {group['items'][0]['title']} 等 {len(group['items'])} 条")
+
+        right = ttk.Frame(frame)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+        ttk.Label(right, text="选择一条作为保留主记录，再合并其余记录").grid(row=0, column=0, sticky="w")
+        self.tree = ttk.Treeview(right, columns=("id", "title", "year", "authors"), show="headings", selectmode="browse")
+        for key, text, width in (("id", "ID", 50), ("title", "标题", 320), ("year", "年份", 70), ("authors", "作者", 220)):
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width, anchor="w")
+        self.tree.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+
+        buttons = ttk.Frame(right)
+        buttons.grid(row=2, column=0, sticky="e", pady=(10, 0))
+        ttk.Button(buttons, text="关闭", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(buttons, text="合并到当前选中", command=self._submit).pack(side="right")
+
+        if groups:
+            self.group_list.selection_set(0)
+            self._on_group_selected()
+
+    def _on_group_selected(self, _event=None) -> None:
+        selection = self.group_list.curselection()
+        if not selection:
+            return
+        self.current_group = self.groups[selection[0]]
+        self.tree.delete(*self.tree.get_children())
+        for item in self.current_group["items"]:
+            self.tree.insert("", "end", iid=str(item["id"]), values=(item["id"], item["title"], item.get("year") or "", " / ".join(item.get("authors", []))))
+        if self.current_group["items"]:
+            self.tree.selection_set(str(self.current_group["items"][0]["id"]))
+
+    def _submit(self) -> None:
+        if not self.current_group:
+            return
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo("提示", "请先选择一条要保留的记录。", parent=self)
+            return
+        primary_id = int(selection[0])
+        merged_ids = [int(item["id"]) for item in self.current_group["items"] if int(item["id"]) != primary_id]
+        self.result = {"primary_id": primary_id, "merged_ids": merged_ids, "reason": self.current_group["reason"]}
+        self.destroy()
+
+
+class SearchDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, database: LibraryDatabase) -> None:
+        super().__init__(parent, "全文搜索", "980x600")
+        self.database = database
+        self.query_var = tk.StringVar()
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(frame)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Entry(toolbar, textvariable=self.query_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(toolbar, text="搜索", command=self._search).pack(side="left", padx=(8, 0))
+
+        self.tree = ttk.Treeview(frame, columns=("title", "year", "authors", "hit"), show="headings")
+        for key, text, width in (("title", "标题", 300), ("year", "年份", 70), ("authors", "作者", 180), ("hit", "命中片段", 340)):
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width, anchor="w")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        self.tree.bind("<Double-1>", lambda _event: self._submit())
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=2, column=0, sticky="e", pady=(10, 0))
+        ttk.Button(buttons, text="关闭", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(buttons, text="定位到选中文献", command=self._submit).pack(side="right")
+
+    def _search(self) -> None:
+        rows = self.database.search_literatures(self.query_var.get().strip())
+        self.tree.delete(*self.tree.get_children())
+        for row in rows:
+            hit = row.get("summary_hit") or row.get("notes_hit") or row.get("attachment_hit") or ""
+            self.tree.insert("", "end", iid=str(row["id"]), values=(row.get("title", ""), row.get("year") or "", row.get("authors_display", ""), hit))
+
+    def _submit(self) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            return
+        self.result = int(selection[0])
+        self.destroy()
+
+
+class MaintenanceDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, database: LibraryDatabase, settings_store: SettingsStore, settings: AppSettings) -> None:
+        super().__init__(parent, "维护工具", "980x620")
+        self.database = database
+        self.settings_store = settings_store
+        self.settings = settings
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        toolbar = ttk.Frame(frame)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Button(toolbar, text="刷新缺失文件", command=self._load_missing).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="按目录修复", command=self._repair).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="重建搜索索引", command=self._rebuild_index).pack(side="left", padx=(0, 18))
+        ttk.Button(toolbar, text="创建备份", command=self._backup).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="恢复备份", command=self._restore).pack(side="left")
+
+        self.tree = ttk.Treeview(frame, columns=("kind", "name", "path"), show="headings")
+        for key, text, width in (("kind", "类型", 80), ("name", "名称", 220), ("path", "缺失路径", 520)):
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=width, anchor="w")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        scroll.grid(row=1, column=1, sticky="ns")
+        self.tree.config(yscrollcommand=scroll.set)
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=2, column=0, sticky="e", pady=(10, 0))
+        ttk.Button(buttons, text="关闭", command=self.destroy).pack(side="right")
+
+        self._load_missing()
+
+    def _load_missing(self) -> None:
+        rows = find_missing_paths(self.database)
+        self.tree.delete(*self.tree.get_children())
+        for index, item in enumerate(rows):
+            kind = "笔记" if item.get("kind") == "note" else "附件"
+            name = item.get("title") or item.get("label") or f"ID {item['id']}"
+            self.tree.insert("", "end", iid=str(index), values=(kind, name, item.get("resolved_path", "")))
+
+    def _repair(self) -> None:
+        folder = filedialog.askdirectory(parent=self, title="选择用于修复的搜索目录")
+        if not folder:
+            return
+        try:
+            result = repair_missing_paths(self.database, folder)
+        except ValueError as exc:
+            messagebox.showerror("修复失败", str(exc), parent=self)
+            return
+        self._load_missing()
+        messagebox.showinfo("修复完成", f"已修复 {result['fixed']} 条，仍有 {result['unresolved']} 条未解决。", parent=self)
+
+    def _rebuild_index(self) -> None:
+        self.database.rebuild_search_index()
+        messagebox.showinfo("完成", "全文搜索索引已重建。", parent=self)
+
+    def _backup(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="创建备份",
+            defaultextension=".zip",
+            filetypes=[("ZIP 文件", "*.zip")],
+            initialfile="literature_manager_backup.zip",
+        )
+        if not path:
+            return
+        backup_path = create_backup(self.settings_store, self.settings, path)
+        messagebox.showinfo("备份完成", f"已创建备份：\n{backup_path}", parent=self)
+
+    def _restore(self) -> None:
+        path = filedialog.askopenfilename(parent=self, title="选择备份文件", filetypes=[("ZIP 文件", "*.zip")])
+        if not path:
+            return
+        if not messagebox.askyesno("确认恢复", "恢复备份将覆盖当前元数据。建议先手动备份一次。继续吗？", parent=self):
+            return
+        self.result = {"restore_path": path}
+        self.destroy()
+
+
+class StatisticsDialog(BaseDialog):
+    def __init__(self, parent: tk.Misc, database: LibraryDatabase) -> None:
+        super().__init__(parent, "统计面板", "760x620")
+        frame = ttk.Frame(self, padding=12)
+        frame.grid(sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        text = scrolledtext.ScrolledText(frame, wrap="word")
+        text.grid(row=0, column=0, sticky="nsew")
+        stats = database.get_statistics()
+        sections = [
+            f"文献总数：{stats['total_literatures']}",
+            f"附件总数：{stats['total_attachments']}",
+            f"笔记总数：{stats['total_notes']}",
+            "",
+            "按年份统计：",
+            "\n".join(f"- {item['label']}: {item['count']}" for item in stats["by_year"]) or "- 无数据",
+            "",
+            "按主题统计：",
+            "\n".join(f"- {item['label']}: {item['count']}" for item in stats["by_subject"]) or "- 无数据",
+            "",
+            "按阅读状态统计：",
+            "\n".join(f"- {item['label']}: {item['count']}" for item in stats["by_status"]) or "- 无数据",
+        ]
+        text.insert("1.0", "\n".join(sections))
+        text.configure(state="disabled")
+        ttk.Button(frame, text="关闭", command=self.destroy).grid(row=1, column=0, sticky="e", pady=(10, 0))
+
+
 class MainWindow(ttk.Frame):
     def __init__(self, parent: tk.Misc, database: LibraryDatabase, settings_store: SettingsStore, settings: AppSettings) -> None:
         super().__init__(parent)
@@ -591,10 +945,18 @@ class MainWindow(ttk.Frame):
                 ("新建文献", self.new_literature),
                 ("编辑", self.edit_literature),
                 ("删除", self.delete_literature),
+                ("导入中心", self.open_import_center),
+                ("元数据补全", self.fill_metadata),
                 ("添加附件", self.add_attachments),
                 ("新增笔记", self.add_note),
                 ("导出 Bib", self.export_bib),
+                ("复制国标", self.copy_gbt_reference),
+                ("导出 CSL", self.export_csl_json),
                 ("PDF 重命名", self.rename_pdfs),
+                ("查重", self.open_dedupe_center),
+                ("全文搜索", self.open_search_center),
+                ("维护", self.open_maintenance_tools),
+                ("统计", self.open_statistics),
                 ("设置", self.open_settings),
             ]
         ):
@@ -941,6 +1303,132 @@ class MainWindow(ttk.Frame):
         widget.insert("1.0", text)
         widget.configure(state="disabled")
 
+    def _merge_metadata_payload(self, current: dict, incoming: dict) -> dict:
+        payload = dict(current)
+        for key, value in incoming.items():
+            if key in {"id", "attachments", "notes"}:
+                continue
+            if key == "authors":
+                if not payload.get("authors"):
+                    payload["authors"] = value
+            elif key == "tags":
+                existing = list(payload.get("tags", []))
+                for tag in value or []:
+                    if tag not in existing:
+                        existing.append(tag)
+                payload["tags"] = existing
+            elif value and not payload.get(key):
+                payload[key] = value
+        return payload
+
+    def reload_database(self) -> None:
+        self.db.close()
+        self.db = LibraryDatabase(self.settings_store.database_path, lambda: self.settings.library_root)
+        self.db.rebuild_search_index()
+        self.refresh_filters()
+        self.refresh_literatures()
+
+    def open_import_center(self) -> None:
+        dialog = ImportCenterDialog(self, self.settings)
+        self.wait_window(dialog)
+        if not dialog.result:
+            return
+        try:
+            result = import_scanned_items(
+                self.db,
+                dialog.result["items"],
+                self.settings,
+                import_mode=dialog.result["import_mode"],
+            )
+        except ValueError as exc:
+            messagebox.showerror("导入失败", str(exc), parent=self)
+            return
+        self.refresh_filters()
+        self.refresh_literatures()
+        self.status_var.set(f"已导入 {result['imported']} 条，跳过 {result['skipped']} 条")
+        messagebox.showinfo("导入完成", f"已导入 {result['imported']} 条，跳过 {result['skipped']} 条。", parent=self)
+
+    def fill_metadata(self) -> None:
+        if not self.current_literature_id:
+            messagebox.showinfo("提示", "请先选择一条文献。", parent=self)
+            return
+        detail = self.db.get_literature(self.current_literature_id)
+        if not detail:
+            return
+        payload = None
+        try:
+            if detail.get("doi"):
+                payload = lookup_doi(detail["doi"])
+            elif detail.get("isbn"):
+                payload = lookup_isbn(detail["isbn"])
+            else:
+                source_type = simpledialog.askstring("元数据补全", "请输入 DOI 或 ISBN：", parent=self)
+                if not source_type:
+                    return
+                source_type = source_type.strip()
+                if source_type.lower().startswith("10."):
+                    payload = lookup_doi(source_type)
+                else:
+                    payload = lookup_isbn(source_type)
+        except ValueError as exc:
+            messagebox.showerror("补全失败", str(exc), parent=self)
+            return
+        if not payload:
+            return
+        preview = MetadataPreviewDialog(self, payload)
+        self.wait_window(preview)
+        if not preview.result:
+            return
+        merged = self._merge_metadata_payload(detail, payload)
+        self.db.save_literature(merged)
+        self.load_literature_detail(self.current_literature_id)
+        self.refresh_literatures()
+        self.status_var.set("元数据已补全")
+
+    def open_dedupe_center(self) -> None:
+        groups = find_duplicate_groups(self.db)
+        if not groups:
+            messagebox.showinfo("查重结果", "当前未检测到重复文献。", parent=self)
+            return
+        dialog = DuplicateDialog(self, groups)
+        self.wait_window(dialog)
+        if not dialog.result:
+            return
+        merge_literatures(self.db, dialog.result["primary_id"], dialog.result["merged_ids"], dialog.result["reason"])
+        self.refresh_filters()
+        self.refresh_literatures()
+        self.literature_tree.selection_set(str(dialog.result["primary_id"]))
+        self.on_literature_selected()
+        self.status_var.set(f"已合并 {len(dialog.result['merged_ids'])} 条重复记录")
+
+    def open_search_center(self) -> None:
+        dialog = SearchDialog(self, self.db)
+        self.wait_window(dialog)
+        if not dialog.result:
+            return
+        if not self.literature_tree.exists(str(dialog.result)):
+            self.clear_filters()
+        self.literature_tree.selection_set(str(dialog.result))
+        self.literature_tree.focus(str(dialog.result))
+        self.on_literature_selected()
+
+    def open_maintenance_tools(self) -> None:
+        dialog = MaintenanceDialog(self, self.db, self.settings_store, self.settings)
+        self.wait_window(dialog)
+        if not dialog.result:
+            return
+        try:
+            self.settings = restore_backup(self.settings_store, dialog.result["restore_path"])
+        except ValueError as exc:
+            messagebox.showerror("恢复失败", str(exc), parent=self)
+            return
+        self.reload_database()
+        messagebox.showinfo("恢复完成", "已恢复备份，当前界面已刷新。", parent=self)
+
+    def open_statistics(self) -> None:
+        dialog = StatisticsDialog(self, self.db)
+        self.wait_window(dialog)
+
     def new_literature(self) -> None:
         dialog = LiteratureDialog(self)
         self.wait_window(dialog)
@@ -1211,6 +1699,47 @@ class MainWindow(ttk.Frame):
         self.settings_store.save(self.settings)
         self.status_var.set(f"已导出 {count} 条文献到 {path}")
         messagebox.showinfo("导出完成", f"已导出 {count} 条文献。", parent=self)
+
+    def copy_gbt_reference(self) -> None:
+        selected = self.get_selected_literature_ids() or ([self.current_literature_id] if self.current_literature_id else [])
+        selected = [item for item in selected if item]
+        if not selected:
+            messagebox.showinfo("提示", "请先选择至少一条文献。", parent=self)
+            return
+        references = []
+        for literature_id in selected:
+            detail = self.db.get_literature(literature_id)
+            if detail:
+                references.append(build_gbt_reference(detail))
+        text = "\n".join(reference for reference in references if reference)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status_var.set(f"已复制 {len(references)} 条国标参考文献")
+        messagebox.showinfo("复制完成", "已复制到剪贴板。", parent=self)
+
+    def export_csl_json(self) -> None:
+        selected = self.get_selected_literature_ids() or ([self.current_literature_id] if self.current_literature_id else [])
+        selected = [item for item in selected if item]
+        if not selected:
+            messagebox.showinfo("提示", "请先选择至少一条文献。", parent=self)
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="导出 CSL JSON",
+            defaultextension=".json",
+            filetypes=[("JSON 文件", "*.json")],
+            initialfile="literature_export_csl.json",
+        )
+        if not path:
+            return
+        entries = []
+        for literature_id in selected:
+            detail = self.db.get_literature(literature_id)
+            if detail:
+                entries.append(build_csl_entry(detail))
+        Path(path).write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.status_var.set(f"已导出 {len(entries)} 条 CSL JSON")
+        messagebox.showinfo("导出完成", f"已导出 {len(entries)} 条记录。", parent=self)
 
     def rename_pdfs(self) -> None:
         selected = self.get_selected_literature_ids() or ([self.current_literature_id] if self.current_literature_id else [])

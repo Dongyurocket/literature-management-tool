@@ -154,24 +154,29 @@ def read_docx_text(path: str | Path) -> str:
     return "\n".join(paragraphs)
 
 
+def load_note_content(path: str | Path) -> str:
+    note_path = Path(path)
+    note_format = detect_note_format(note_path)
+    try:
+        if note_format == "docx":
+            return read_docx_text(note_path)
+        return note_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        try:
+            return note_path.read_text(encoding="gbk")
+        except (UnicodeDecodeError, OSError):
+            return ""
+    except OSError:
+        return ""
+
+
 def load_note_preview(path: str | Path, max_length: int = 4000) -> str:
     note_path = Path(path)
     if not note_path.exists():
         return "笔记文件不存在。"
 
     note_format = detect_note_format(note_path)
-    try:
-        if note_format == "docx":
-            content = read_docx_text(note_path)
-        else:
-            content = note_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        try:
-            content = note_path.read_text(encoding="gbk")
-        except (UnicodeDecodeError, OSError):
-            content = ""
-    except OSError:
-        content = ""
+    content = load_note_content(note_path)
 
     if not content.strip():
         return f"文件：{note_path}\n\n暂时无法预览该笔记内容。"
@@ -180,6 +185,16 @@ def load_note_preview(path: str | Path, max_length: int = 4000) -> str:
     if len(content) > max_length:
         content = f"{content[:max_length].rstrip()}..."
     return f"文件：{note_path}\n格式：{note_format_label(note_format)}\n\n{content}"
+
+
+def normalize_for_compare(value: str) -> str:
+    lowered = (value or "").lower()
+    return re.sub(r"\W+", "", lowered)
+
+
+def extract_year(text: str) -> int | None:
+    match = re.search(r"(19|20)\d{2}", text or "")
+    return int(match.group(0)) if match else None
 
 
 def build_cite_key(authors: list[str], year: int | str | None, title: str) -> str:
@@ -254,3 +269,90 @@ def build_bib_entry(entry: dict) -> str:
 
 def build_bibtex(entries: list[dict]) -> str:
     return "\n\n".join(build_bib_entry(entry) for entry in entries)
+
+
+def build_gbt_reference(entry: dict) -> str:
+    authors = entry.get("authors", [])
+    author_text = "，".join(authors) if authors else "佚名"
+    title = entry.get("title", "")
+    year = entry.get("year", "")
+    publication_title = entry.get("publication_title", "")
+    publisher = entry.get("publisher", "") or entry.get("school", "")
+    pages = entry.get("pages", "")
+    volume = entry.get("volume", "")
+    issue = entry.get("issue", "")
+    doi = entry.get("doi", "")
+    entry_type = entry.get("entry_type", "misc")
+
+    if entry_type == "journal_article":
+        parts = [f"{author_text}. {title}[J]"]
+        if publication_title:
+            parts.append(publication_title)
+        detail = []
+        if year:
+            detail.append(str(year))
+        if volume:
+            volume_part = str(volume)
+            if issue:
+                volume_part += f"({issue})"
+            detail.append(volume_part)
+        elif issue:
+            detail.append(f"({issue})")
+        if pages:
+            detail.append(str(pages))
+        if detail:
+            parts.append(", ".join(detail))
+        reference = ". ".join(part for part in parts if part)
+    elif entry_type == "book":
+        reference = f"{author_text}. {title}[M]. {publisher}, {year}"
+    elif entry_type == "thesis":
+        reference = f"{author_text}. {title}[D]. {publisher}, {year}"
+    elif entry_type == "conference_paper":
+        reference = f"{author_text}. {title}[C]. {publication_title or publisher}, {year}"
+    elif entry_type == "report":
+        reference = f"{author_text}. {title}[R]. {publisher}, {year}"
+    elif entry_type == "standard":
+        reference = f"{title}[S]. {year}"
+    else:
+        reference = f"{author_text}. {title}[Z]. {publisher}, {year}"
+    if doi:
+        reference = f"{reference}. DOI:{doi}"
+    return reference.strip(" ,.")
+
+
+def build_csl_entry(entry: dict) -> dict:
+    authors = entry.get("authors", [])
+    author_items = []
+    for name in authors:
+        parts = name.split()
+        if len(parts) >= 2:
+            author_items.append({"family": parts[-1], "given": " ".join(parts[:-1])})
+        else:
+            author_items.append({"literal": name})
+    csl_type = {
+        "journal_article": "article-journal",
+        "book": "book",
+        "thesis": "thesis",
+        "conference_paper": "paper-conference",
+        "report": "report",
+        "patent": "patent",
+        "webpage": "webpage",
+    }.get(entry.get("entry_type", "misc"), "article")
+    payload = {
+        "id": entry.get("cite_key") or build_cite_key(authors, entry.get("year"), entry.get("title", "")),
+        "type": csl_type,
+        "title": entry.get("title", ""),
+        "author": author_items,
+        "issued": {"date-parts": [[entry.get("year")]]} if entry.get("year") else None,
+        "container-title": entry.get("publication_title", ""),
+        "publisher": entry.get("publisher", ""),
+        "volume": entry.get("volume", ""),
+        "issue": entry.get("issue", ""),
+        "page": entry.get("pages", ""),
+        "DOI": entry.get("doi", ""),
+        "ISBN": entry.get("isbn", ""),
+        "URL": entry.get("url", ""),
+        "abstract": entry.get("abstract", ""),
+        "keyword": entry.get("keywords", ""),
+    }
+    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}

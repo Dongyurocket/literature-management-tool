@@ -1,10 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .metadata_service import extract_pdf_text
 from .utils import (
     build_attachment_name,
     build_bibtex,
@@ -13,6 +15,7 @@ from .utils import (
     compute_checksum,
     detect_note_format,
     ensure_unique_path,
+    load_note_content,
     now_text,
 )
 
@@ -97,7 +100,11 @@ CREATE TABLE IF NOT EXISTS attachments (
     file_path TEXT NOT NULL,
     is_relative INTEGER NOT NULL DEFAULT 0,
     is_primary INTEGER NOT NULL DEFAULT 0,
+    original_name TEXT,
+    file_size INTEGER NOT NULL DEFAULT 0,
     checksum TEXT,
+    extracted_text TEXT,
+    text_extracted_at TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (literature_id) REFERENCES literatures(id) ON DELETE CASCADE
 );
@@ -131,6 +138,25 @@ CREATE TABLE IF NOT EXISTS rename_history (
     new_path TEXT NOT NULL,
     renamed_at TEXT NOT NULL,
     FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS import_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    literature_id INTEGER NOT NULL,
+    metadata_json TEXT,
+    imported_at TEXT NOT NULL,
+    FOREIGN KEY (literature_id) REFERENCES literatures(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS merge_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    primary_literature_id INTEGER NOT NULL,
+    merged_literature_id INTEGER NOT NULL,
+    merge_reason TEXT,
+    details_json TEXT,
+    merged_at TEXT NOT NULL
 );
 """
 
@@ -184,13 +210,24 @@ class LibraryDatabase:
         self._ensure_column("notes", "note_format", "TEXT NOT NULL DEFAULT 'text'")
         self._ensure_column("notes", "external_path", "TEXT")
         self._ensure_column("notes", "external_is_relative", "INTEGER NOT NULL DEFAULT 0")
-        self.connection.execute("PRAGMA user_version = 2")
+        self._ensure_column("attachments", "original_name", "TEXT")
+        self._ensure_column("attachments", "file_size", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("attachments", "extracted_text", "TEXT")
+        self._ensure_column("attachments", "text_extracted_at", "TEXT")
+        self._ensure_search_table()
+        self.connection.execute("PRAGMA user_version = 3")
         self.connection.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
         columns = {row[1] for row in self._fetchall(f"PRAGMA table_info({table})")}
         if column not in columns:
             self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _ensure_search_table(self) -> None:
+        self.connection.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS literature_fts USING fts5("
+            "literature_id UNINDEXED, title, translated_title, authors, subject, keywords, summary, abstract, notes_text, attachments_text)"
+        )
 
     def _fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:
         return self.connection.execute(sql, params).fetchone()
@@ -209,6 +246,98 @@ class LibraryDatabase:
     def get_setting(self, key: str, default: str = "") -> str:
         row = self._fetchone("SELECT value FROM settings WHERE key = ?", (key,))
         return row["value"] if row else default
+
+    def rebuild_search_index(self) -> None:
+        self.connection.execute("DELETE FROM literature_fts")
+        rows = self._fetchall("SELECT id FROM literatures ORDER BY id")
+        for row in rows:
+            self.refresh_search_index_for_literature(int(row["id"]))
+        self.connection.commit()
+
+    def refresh_search_index_for_literature(self, literature_id: int) -> None:
+        literature = self.get_literature(literature_id)
+        self.connection.execute("DELETE FROM literature_fts WHERE literature_id = ?", (literature_id,))
+        if not literature:
+            return
+        authors = " ".join(literature.get("authors", []))
+        notes_texts: list[str] = []
+        for note in literature.get("notes", []):
+            if note.get("note_type") == "file" and note.get("resolved_path"):
+                notes_texts.append(load_note_content(note["resolved_path"]))
+            else:
+                notes_texts.append(note.get("content", ""))
+        attachments_texts: list[str] = []
+        for item in literature.get("attachments", []):
+            extracted = item.get("extracted_text", "")
+            resolved_path = item.get("resolved_path", "")
+            if not extracted and resolved_path and Path(resolved_path).exists():
+                extracted = self._extract_attachment_text(Path(resolved_path))
+                if extracted:
+                    self.connection.execute(
+                        "UPDATE attachments SET extracted_text = ?, text_extracted_at = ? WHERE id = ?",
+                        (extracted, now_text(), item["id"]),
+                    )
+            if extracted:
+                attachments_texts.append(extracted)
+        self.connection.execute(
+            "INSERT INTO literature_fts(literature_id, title, translated_title, authors, subject, keywords, summary, abstract, notes_text, attachments_text) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                literature_id,
+                literature.get("title", ""),
+                literature.get("translated_title", ""),
+                authors,
+                literature.get("subject", ""),
+                literature.get("keywords", ""),
+                literature.get("summary", ""),
+                literature.get("abstract", ""),
+                "\n".join(notes_texts),
+                "\n".join(attachments_texts),
+            ),
+        )
+
+    def search_literatures(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
+        text = (query or "").strip()
+        if not text:
+            return []
+        sql = (
+            "SELECT l.id, l.title, l.year, l.entry_type, "
+            "COALESCE((SELECT GROUP_CONCAT(a.name, ' / ') FROM literature_authors la JOIN authors a ON a.id = la.author_id "
+            "WHERE la.literature_id = l.id ORDER BY la.author_order), '') AS authors_display, "
+            "snippet(literature_fts, 6, '[', ']', '...', 12) AS summary_hit, "
+            "snippet(literature_fts, 8, '[', ']', '...', 12) AS notes_hit, "
+            "snippet(literature_fts, 9, '[', ']', '...', 12) AS attachment_hit "
+            "FROM literature_fts "
+            "JOIN literatures l ON l.id = literature_fts.literature_id "
+            "WHERE literature_fts MATCH ? "
+            "ORDER BY bm25(literature_fts) LIMIT ?"
+        )
+        try:
+            rows = self._fetchall(sql, (text, limit))
+            return [dict(row) for row in rows]
+        except sqlite3.OperationalError:
+            like = f"%{text}%"
+            fallback = self._fetchall(
+                "SELECT id, title, year, entry_type FROM literatures WHERE title LIKE ? OR subject LIKE ? OR keywords LIKE ? OR summary LIKE ? LIMIT ?",
+                (like, like, like, like, limit),
+            )
+            return [dict(row) for row in fallback]
+
+    def get_statistics(self) -> dict[str, Any]:
+        total = self._fetchone("SELECT COUNT(*) AS count FROM literatures")["count"]
+        attachments = self._fetchone("SELECT COUNT(*) AS count FROM attachments")["count"]
+        notes = self._fetchone("SELECT COUNT(*) AS count FROM notes")["count"]
+        by_year = [dict(row) for row in self._fetchall("SELECT COALESCE(CAST(year AS TEXT), '未标注') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(year, -1) ORDER BY year DESC")]
+        by_subject = [dict(row) for row in self._fetchall("SELECT COALESCE(subject, '未分类') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(subject, '未分类') ORDER BY count DESC, label LIMIT 12")]
+        by_status = [dict(row) for row in self._fetchall("SELECT COALESCE(reading_status, '未标注') AS label, COUNT(*) AS count FROM literatures GROUP BY COALESCE(reading_status, '未标注') ORDER BY count DESC")]
+        return {
+            "total_literatures": total,
+            "total_attachments": attachments,
+            "total_notes": notes,
+            "by_year": by_year,
+            "by_subject": by_subject,
+            "by_status": by_status,
+        }
 
     def list_filter_values(self) -> dict[str, list[str]]:
         subjects = [row[0] for row in self._fetchall(
@@ -348,11 +477,13 @@ class LibraryDatabase:
                 (literature_id, tag_id),
             )
 
+        self.refresh_search_index_for_literature(int(literature_id))
         self.connection.commit()
         return int(literature_id)
 
     def delete_literature(self, literature_id: int) -> None:
         self.connection.execute("DELETE FROM literatures WHERE id = ?", (literature_id,))
+        self.connection.execute("DELETE FROM literature_fts WHERE literature_id = ?", (literature_id,))
         self.connection.commit()
 
     def _get_or_create_author(self, name: str) -> int:
@@ -405,6 +536,14 @@ class LibraryDatabase:
             return (root / stored_path).resolve()
         return Path(stored_path)
 
+    def _extract_attachment_text(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            return extract_pdf_text(path)
+        if suffix in {".docx", ".md", ".markdown", ".txt"}:
+            return load_note_content(path)
+        return ""
+
     def add_attachments(
         self,
         literature_id: int,
@@ -444,9 +583,10 @@ class LibraryDatabase:
                 else:
                     shutil.move(str(source), str(final_path))
             stored_path, is_relative = self._store_path(final_path)
+            extracted_text = self._extract_attachment_text(final_path)
             cursor = self.connection.execute(
-                "INSERT INTO attachments(literature_id, label, role, language, file_path, is_relative, is_primary, checksum, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO attachments(literature_id, label, role, language, file_path, is_relative, is_primary, original_name, file_size, checksum, extracted_text, text_extracted_at, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     literature_id,
                     final_path.name,
@@ -455,11 +595,17 @@ class LibraryDatabase:
                     stored_path,
                     is_relative,
                     1 if is_primary else 0,
+                    source.name,
+                    final_path.stat().st_size if final_path.exists() else 0,
                     compute_checksum(final_path),
+                    extracted_text,
+                    now_text() if extracted_text else "",
                     now_text(),
                 ),
             )
             created_ids.append(int(cursor.lastrowid))
+        self.connection.commit()
+        self.refresh_search_index_for_literature(literature_id)
         self.connection.commit()
         return created_ids
 
@@ -492,6 +638,8 @@ class LibraryDatabase:
         self.connection.commit()
         if delete_file and path.exists():
             path.unlink(missing_ok=True)
+        self.refresh_search_index_for_literature(int(attachment["literature_id"]))
+        self.connection.commit()
 
     def _prepare_note_file_storage(
         self,
@@ -613,6 +761,7 @@ class LibraryDatabase:
                 "INSERT INTO note_attachment_links(note_id, attachment_id) VALUES(?, ?)",
                 (note_id, attachment_id),
             )
+        self.refresh_search_index_for_literature(literature_id)
         self.connection.commit()
         return int(note_id)
 
@@ -622,6 +771,29 @@ class LibraryDatabase:
         self.connection.commit()
         if delete_file and note and note.get("resolved_path"):
             Path(note["resolved_path"]).unlink(missing_ok=True)
+        if note:
+            self.refresh_search_index_for_literature(int(note["literature_id"]))
+            self.connection.commit()
+
+    def record_import_history(self, source_path: str, source_kind: str, literature_id: int, metadata: dict[str, Any]) -> None:
+        self.connection.execute(
+            "INSERT INTO import_history(source_path, source_kind, literature_id, metadata_json, imported_at) VALUES(?, ?, ?, ?, ?)",
+            (source_path, source_kind, literature_id, json.dumps(metadata, ensure_ascii=False), now_text()),
+        )
+        self.connection.commit()
+
+    def record_merge_history(
+        self,
+        primary_literature_id: int,
+        merged_literature_id: int,
+        merge_reason: str,
+        details: dict[str, Any],
+    ) -> None:
+        self.connection.execute(
+            "INSERT INTO merge_history(primary_literature_id, merged_literature_id, merge_reason, details_json, merged_at) VALUES(?, ?, ?, ?, ?)",
+            (primary_literature_id, merged_literature_id, merge_reason, json.dumps(details, ensure_ascii=False), now_text()),
+        )
+        self.connection.commit()
 
     def export_bib(self, literature_ids: list[int], destination: str) -> int:
         entries = [self._build_bib_payload(literature_id) for literature_id in literature_ids]
@@ -691,5 +863,8 @@ class LibraryDatabase:
                 (preview["attachment_id"], str(old_path), str(new_path), now_text()),
             )
             renamed += 1
+            attachment = self.get_attachment(preview["attachment_id"])
+            if attachment:
+                self.refresh_search_index_for_literature(int(attachment["literature_id"]))
         self.connection.commit()
         return renamed
