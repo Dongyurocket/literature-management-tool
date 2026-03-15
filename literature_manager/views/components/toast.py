@@ -16,7 +16,7 @@ class ToastOverlay(QFrame):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self._queue: deque[tuple[str, str, int]] = deque()
+        self._queue: deque[tuple[str, str, int, str]] = deque()
         self._showing = False
         self.setVisible(False)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)

@@ -1,12 +1,13 @@
 ﻿from __future__ import annotations
 
+import logging
 import time
 import traceback
 import webbrowser
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QTimer, Qt
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QKeySequence, QResizeEvent, QShortcut
+from PySide6.QtGui import QCloseEvent, QColor, QDragEnterEvent, QDropEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -72,6 +73,8 @@ from .dialogs import (
 )
 from .theme import apply_theme
 
+_logger = logging.getLogger(__name__)
+
 TOAST_SELECT_LITERATURE_MESSAGE = "请至少选择一条文献记录。"
 TOAST_EXPORT_SUCCESS_TEMPLATE = "已导出 {count} 条记录到 `{path}`。"
 TOAST_FILE_SAVED_TEMPLATE = "文件已保存到 `{path}`。"
@@ -119,6 +122,8 @@ class QtMainWindow(QMainWindow):
         self._metadata_snapshot: dict[str, object] | None = None
         self._loading_notes = False
         self._maintenance_dialog: MaintenanceDialog | None = None
+        self._active_workers: list[AsyncWorker] = []
+        self._active_task_labels: set[str] = set()
         self._thread_pool = QThreadPool.globalInstance()
         self._busy_tasks: list[tuple[int, str]] = []
         self._busy_task_seq = 0
@@ -143,6 +148,18 @@ class QtMainWindow(QMainWindow):
         self._load_navigation("all")
         self._refresh_stats()
         self._refresh_table()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._busy_state_guard_timer.stop()
+        if self._metadata_save_timer.isActive():
+            self._metadata_save_timer.stop()
+            self._save_metadata_changes()
+        for worker in self._active_workers:
+            worker.cancel()
+        self._thread_pool.waitForDone(2000)
+        if self._maintenance_dialog is not None:
+            self._maintenance_dialog.close()
+        super().closeEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -237,9 +254,11 @@ class QtMainWindow(QMainWindow):
         if not stale_tokens:
             return
         stale_set = set(stale_tokens)
+        stale_labels = {msg for tok, msg in self._busy_tasks if tok in stale_set}
         self._busy_tasks = [item for item in self._busy_tasks if item[0] not in stale_set]
         for token in stale_tokens:
             self._busy_task_started_at.pop(token, None)
+        self._active_task_labels -= stale_labels
         self._refresh_busy_state()
         if not self._busy_tasks:
             self.statusBar().showMessage("后台任务状态已自动恢复。", 3000)
@@ -250,6 +269,7 @@ class QtMainWindow(QMainWindow):
         try:
             callback(*args)
         except Exception:
+            _logger.error("UI callback failed (%s)", error_title, exc_info=True)
             self._show_toast(
                 error_title,
                 self._error_summary(traceback.format_exc()),
@@ -288,24 +308,37 @@ class QtMainWindow(QMainWindow):
         success_toast: tuple[str, str] | None = None,
         error_title: str = "操作失败",
     ) -> None:
+        if label in self._active_task_labels:
+            self._show_toast("提示", "任务正在执行，请稍候…", level="warning")
+            return
+
         task_token = self._begin_busy_task(label)
+        self._active_task_labels.add(label)
         task_closed = False
         worker = AsyncWorker(task)
+        self._active_workers.append(worker)
 
         def close_busy_once() -> None:
             nonlocal task_closed
             if task_closed:
                 return
             task_closed = True
+            self._active_task_labels.discard(label)
             self._end_busy_task(task_token)
 
         def handle_result(result) -> None:
+            if worker.is_cancelled:
+                close_busy_once()
+                return
             close_busy_once()
             self._run_ui_callback(on_result, result, error_title=error_title)
             if success_toast is not None:
                 self._show_toast(success_toast[0], success_toast[1], level="success")
 
         def handle_error(error: WorkerError | str) -> None:
+            if worker.is_cancelled:
+                close_busy_once()
+                return
             close_busy_once()
             if on_error is not None:
                 self._run_ui_callback(on_error, error, error_title=error_title)
@@ -314,9 +347,12 @@ class QtMainWindow(QMainWindow):
 
         def handle_finished() -> None:
             try:
-                self._run_ui_callback(on_finished, error_title=error_title)
+                if not worker.is_cancelled:
+                    self._run_ui_callback(on_finished, error_title=error_title)
             finally:
                 close_busy_once()
+                if worker in self._active_workers:
+                    self._active_workers.remove(worker)
 
         worker.signals.result.connect(handle_result)
         worker.signals.error.connect(handle_error)
@@ -1518,6 +1554,9 @@ class QtMainWindow(QMainWindow):
         export_path = self.viewmodel.export_statistics(template_key, path)
         self._show_file_saved_toast("统计报表已导出", export_path)
 
+    def _on_maintenance_dialog_finished(self) -> None:
+        self._maintenance_dialog = None
+
     def _open_maintenance_center(self) -> None:
         if self._maintenance_dialog is None:
             dialog = MaintenanceDialog(self)
@@ -1526,7 +1565,7 @@ class QtMainWindow(QMainWindow):
             dialog.rebuildRequested.connect(self._rebuild_search_index)
             dialog.backupRequested.connect(self._create_backup)
             dialog.restoreRequested.connect(self._restore_backup)
-            dialog.finished.connect(lambda _code=0: setattr(self, "_maintenance_dialog", None))
+            dialog.finished.connect(self._on_maintenance_dialog_finished)
             self._maintenance_dialog = dialog
         self._maintenance_dialog.show()
         self._maintenance_dialog.raise_()

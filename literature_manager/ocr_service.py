@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import os
 import shutil
@@ -13,6 +14,8 @@ from urllib import error, request
 
 from . import __version__
 from .config import AppSettings, DEFAULT_UMI_OCR_REPO, resolve_tools_dir
+
+_logger = logging.getLogger(__name__)
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/{repo}/releases/latest"
 HTTP_HEADERS = {
@@ -195,6 +198,7 @@ def _probe_umi_service(umi_executable: str | Path) -> str | None:
     try:
         _get_json(f"{base_url}/api/doc/get_options")
     except Exception:
+        _logger.warning("Umi-OCR probe failed at %s", base_url, exc_info=True)
         return None
     return base_url
 
@@ -307,6 +311,7 @@ def _clear_umi_doc_task(base_url: str, task_id: str) -> None:
             timeout=10,
         ).read()
     except Exception:
+        _logger.warning("Failed to clear Umi-OCR task %s", task_id, exc_info=True)
         return
 
 
@@ -435,6 +440,7 @@ def extract_pdf_text_with_ocr(path: str | Path, pdf_text: str, settings: AppSett
     try:
         ocr_text = run_ocr(path, settings)
     except Exception:
+        _logger.warning("OCR failed for %s", path, exc_info=True)
         return pdf_text
     if pdf_text.strip() and ocr_text.strip():
         return f"{pdf_text.strip()}\n\n{ocr_text.strip()}".strip()

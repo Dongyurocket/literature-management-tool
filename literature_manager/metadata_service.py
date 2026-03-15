@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 import ssl
 from pathlib import Path
@@ -21,6 +22,8 @@ from . import __version__
 from .config import AppSettings
 from .ocr_service import extract_pdf_text_with_ocr
 from .utils import detect_note_format, extract_year, normalize_for_compare, sanitize_filename
+
+_logger = logging.getLogger(__name__)
 
 CROSSREF_WORK = "https://api.crossref.org/works/{doi}"
 CROSSREF_SEARCH = "https://api.crossref.org/works?rows=1&query.bibliographic={query}"
@@ -1344,12 +1347,14 @@ def extract_pdf_text(path: str | Path, max_pages: int = 6) -> str:
     try:
         reader = PdfReader(str(path))
     except Exception:
+        _logger.warning("Failed to open PDF %s", path, exc_info=True)
         return ""
     chunks: list[str] = []
     for page in reader.pages[:max_pages]:
         try:
             text = page.extract_text() or ""
         except Exception:
+            _logger.warning("Failed to extract text from page in %s", path, exc_info=True)
             text = ""
         if text.strip():
             chunks.append(text.strip())
@@ -1370,7 +1375,7 @@ def infer_pdf_metadata(path: str | Path, settings: AppSettings | None = None) ->
         if author_text:
             authors = [item.strip() for item in re.split(r"[,;/]", author_text) if item.strip()]
     except Exception:
-        pass
+        _logger.warning("Failed to read PDF metadata from %s", file_path, exc_info=True)
 
     extracted_text = extract_pdf_text(file_path)
     if settings is not None:

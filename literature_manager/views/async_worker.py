@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 import traceback
 from collections.abc import Callable
@@ -23,22 +24,33 @@ class WorkerSignals(QObject):
 class AsyncWorker(QRunnable):
     def __init__(self, task: Callable[[], object]) -> None:
         super().__init__()
+        self.setAutoDelete(False)
         self.task = task
         self.signals = WorkerSignals()
+        self._cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled.is_set()
 
     @Slot()
     def run(self) -> None:
         try:
             result = self.task()
         except Exception as exc:
-            self.signals.error.emit(
-                WorkerError(
-                    message=str(exc) or exc.__class__.__name__,
-                    exception_type=exc.__class__.__name__,
-                    traceback_text=traceback.format_exc(),
+            if not self._cancelled.is_set():
+                self.signals.error.emit(
+                    WorkerError(
+                        message=str(exc) or exc.__class__.__name__,
+                        exception_type=exc.__class__.__name__,
+                        traceback_text=traceback.format_exc(),
+                    )
                 )
-            )
         else:
-            self.signals.result.emit(result)
+            if not self._cancelled.is_set():
+                self.signals.result.emit(result)
         finally:
             self.signals.finished.emit()

@@ -28,8 +28,8 @@ def main() -> int:
     controller = LibraryController(settings_store, settings)
     apply_theme(app, settings.ui_theme)
 
+    app.aboutToQuit.connect(controller.close)
+
     window = QtMainWindow(MainWindowViewModel(controller))
     window.show()
-    exit_code = app.exec()
-    controller.close()
-    return exit_code
+    return app.exec()
