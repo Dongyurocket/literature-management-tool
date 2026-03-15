@@ -2046,6 +2046,7 @@ class QtMainWindow(QMainWindow):
     def _open_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
         if not attachment:
+            self._show_toast("打开附件", "请先选择一个附件。", level="warning")
             return
         preferred_app = ""
         if str(attachment.get("resolved_path", "")).lower().endswith(".pdf"):
@@ -2062,11 +2063,14 @@ class QtMainWindow(QMainWindow):
     def _reveal_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
         if not attachment:
+            self._show_toast("定位附件", "请先选择一个附件。", level="warning")
             return
+        resolved = str(attachment["resolved_path"])
+        _logger.debug("Revealing attachment id=%s path=%s", self._current_attachment_id, resolved)
         try:
-            reveal_path(str(attachment["resolved_path"]))
+            reveal_path(resolved)
         except FileNotFoundError:
-            QMessageBox.warning(self, "定位附件", f"文件不存在：\n{attachment['resolved_path']}")
+            QMessageBox.warning(self, "定位附件", f"文件不存在：\n{resolved}")
 
     def _delete_selected_attachment(self) -> None:
         if self._current_attachment_id is None:
@@ -2143,7 +2147,16 @@ class QtMainWindow(QMainWindow):
     def _on_attachment_selected(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
         if self._loading_attachments:
             return
-        self._current_attachment_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+        if current is not None:
+            self._current_attachment_id = current.data(Qt.ItemDataRole.UserRole)
+            self.open_attachment_button.setEnabled(True)
+            self.reveal_attachment_button.setEnabled(True)
+            self.delete_attachment_button.setEnabled(True)
+        else:
+            self._current_attachment_id = None
+            self.open_attachment_button.setEnabled(False)
+            self.reveal_attachment_button.setEnabled(False)
+            self.delete_attachment_button.setEnabled(False)
 
     def _on_attachment_double_clicked(self, item: QListWidgetItem) -> None:
         attachment_id = item.data(Qt.ItemDataRole.UserRole)

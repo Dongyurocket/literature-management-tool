@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
-  <img src="https://img.shields.io/badge/tests-68%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-70%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -323,12 +323,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.1
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.7.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.7.1-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -346,10 +346,10 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 68 tests
+python -m unittest discover -s tests -v    # 70 tests
 
 # 或使用 pytest
-python -m pytest -q
+python -m pytest -q    # 70 tests
 
 # 语法检查
 python -m compileall main.py literature_manager
@@ -360,6 +360,16 @@ python -m compileall main.py literature_manager
 ## 更新日志
 
 <details open>
+<summary><b>V0.7.1</b> — 资源管理器定位修复与附件交互优化</summary>
+
+- 修复"定位文件"打开错误位置：`reveal_path` 改用字符串格式调用 `explorer /select,`，解决路径含空格时 Python `list2cmdline` 引号包裹导致 Explorer 无法识别 `/select,` 标志的问题
+- 修复 `resolve_path` 路径对称性：拼接时统一使用 `root.resolve()`，与 `_store_path` 基准一致
+- 未选中附件时点击"打开"或"定位文件"改为 toast 提示，不再静默失败
+- 附件选中状态与按钮启禁联动，取消选中后禁用操作按钮
+- 新增路径含空格、中文字符的定位测试用例
+</details>
+
+<details>
 <summary><b>V0.7.0</b> — 附件定位修复与交互增强</summary>
 
 - 修复附件"定位文件"功能失效：加载附件列表时增加守卫标志，防止 Qt 信号在清空/添加过程中错误重置当前选中 ID
