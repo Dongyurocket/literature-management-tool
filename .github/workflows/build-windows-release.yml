@@ -76,7 +76,7 @@ jobs:
             throw "Release asset not found in dist."
           }
 
-          gh release view $tag *> $null
+          cmd /c "gh release view $tag >NUL 2>NUL"
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $asset --clobber
             exit 0
