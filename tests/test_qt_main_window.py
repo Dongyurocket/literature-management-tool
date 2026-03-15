@@ -8,6 +8,7 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from literature_manager.config import AppSettings, SettingsStore
@@ -271,6 +272,88 @@ class QtMainWindowMetadataTests(unittest.TestCase):
                 self.assertEqual(detail.get("publisher"), "")
                 self.assertEqual(detail.get("publication_place"), "")
                 self.assertEqual(detail.get("edition"), "")
+
+    def test_manual_save_mode_marks_dirty_and_can_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                literature_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "手动保存测试",
+                        "authors": ["张三"],
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
+                window._show_detail(literature_id)
+
+                window.metadata_autosave_checkbox.setChecked(False)
+                APP.processEvents()
+                self.assertFalse(window.viewmodel.settings.detail_autosave_enabled)
+
+                window.title_edit.setText("手动保存测试 - 已修改")
+                window._schedule_metadata_save()
+
+                self.assertFalse(window._metadata_save_timer.isActive())
+                self.assertEqual(window.metadata_save_label.text(), "未保存")
+
+                window._save_metadata_changes()
+
+                detail = window.viewmodel.controller.get_literature(literature_id)
+                self.assertEqual(detail.get("title"), "手动保存测试 - 已修改")
+                self.assertEqual(window.metadata_save_label.text(), "已保存")
+
+    def test_switching_record_flushes_pending_metadata_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                first_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "第一条",
+                        "authors": ["张三"],
+                        "tags": [],
+                    }
+                )
+                second_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "journal_article",
+                        "title": "第二条",
+                        "authors": ["李四"],
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=first_id, navigation_key="all")
+                window._show_detail(first_id)
+                window.metadata_autosave_checkbox.setChecked(False)
+                APP.processEvents()
+
+                window.title_edit.setText("第一条 - 切换前保存")
+                window._schedule_metadata_save()
+                window._show_detail(second_id)
+
+                detail = window.viewmodel.controller.get_literature(first_id)
+                self.assertEqual(detail.get("title"), "第一条 - 切换前保存")
+                self.assertEqual(window._current_literature_id, second_id)
+
+
+class QtMainWindowTablePreferenceTests(unittest.TestCase):
+    def test_custom_columns_and_widths_are_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                window._save_table_preferences(
+                    column_keys=["title", "authors", "note_count"],
+                    column_widths={"title": 410, "authors": 240, "note_count": 92},
+                )
+                window._apply_table_preferences()
+
+                self.assertEqual(window._table_model.column_keys(), ["title", "authors", "note_count"])
+                self.assertEqual(window._table_model.headerData(2, Qt.Orientation.Horizontal), "笔记数")
+                self.assertEqual(window.table.columnWidth(0), 410)
+
+                window.table.setColumnWidth(1, 280)
+                window._persist_current_table_layout()
+
+                self.assertEqual(window.viewmodel.settings.list_column_widths["authors"], 280)
 
 
 class SettingsDialogMetadataSourceTests(unittest.TestCase):

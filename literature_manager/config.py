@@ -7,6 +7,12 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .table_columns import (
+    DEFAULT_LITERATURE_COLUMN_KEYS,
+    normalize_literature_column_keys,
+    normalize_literature_column_widths,
+)
+
 APP_NAME = "Literature management tool"
 APP_DISPLAY_NAME = "文献管理工具"
 ENV_HOME = "LITERATURE_MANAGER_HOME"
@@ -64,6 +70,20 @@ class AppSettings:
     update_repo: str = DEFAULT_UPDATE_REPO
     metadata_sources: list[str] = field(default_factory=lambda: list(DEFAULT_METADATA_SOURCES))
     preferred_export_template: str = "markdown_report"
+    detail_autosave_enabled: bool = True
+    detail_autosave_interval_sec: int = 2
+    list_columns: list[str] = field(default_factory=lambda: list(DEFAULT_LITERATURE_COLUMN_KEYS))
+    list_column_widths: dict[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.detail_autosave_enabled = bool(self.detail_autosave_enabled)
+        try:
+            interval_sec = int(self.detail_autosave_interval_sec)
+        except (TypeError, ValueError):
+            interval_sec = 2
+        self.detail_autosave_interval_sec = min(max(interval_sec, 1), 300)
+        self.list_columns = normalize_literature_column_keys(self.list_columns)
+        self.list_column_widths = normalize_literature_column_widths(self.list_column_widths)
 
 
 class SettingsStore:

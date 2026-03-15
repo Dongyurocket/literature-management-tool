@@ -4,12 +4,14 @@ import logging
 import time
 import traceback
 import webbrowser
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, QTimer, Qt
 from PySide6.QtGui import QCloseEvent, QColor, QDragEnterEvent, QDropEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -45,6 +47,7 @@ from ..desktop import open_path, reveal_path
 from ..metadata_fields import metadata_field_label, metadata_field_set, prune_metadata_payload
 from ..models import LiteratureTableModel
 from ..ocr_service import has_ocr_config
+from ..table_columns import literature_column_by_key
 from ..utils import (
     ENTRY_TYPE_LABELS,
     READING_STATUSES,
@@ -60,6 +63,7 @@ from .components import SearchBar
 from .components import ToastOverlay
 from .dialogs import (
     AttachmentDialog,
+    ColumnSettingsDialog,
     DuplicateDialog,
     ImportCenterDialog,
     LibraryProfilesDialog,
@@ -135,15 +139,23 @@ class QtMainWindow(QMainWindow):
         self._busy_state_guard_timer.start()
 
         self._metadata_save_timer = QTimer(self)
-        self._metadata_save_timer.setInterval(650)
         self._metadata_save_timer.setSingleShot(True)
         self._metadata_save_timer.timeout.connect(self._save_metadata_changes)
+        self._updating_metadata_autosave_controls = False
+
+        self._table_layout_save_timer = QTimer(self)
+        self._table_layout_save_timer.setInterval(500)
+        self._table_layout_save_timer.setSingleShot(True)
+        self._table_layout_save_timer.timeout.connect(self._persist_current_table_layout)
+        self._applying_table_layout = False
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1640, 980)
         self.setAcceptDrops(True)
 
         self._build_ui()
+        self._apply_metadata_autosave_preferences()
+        self._apply_table_preferences()
         self._bind_shortcuts()
         self._apply_theme(self.viewmodel.settings.ui_theme)
         self._load_navigation("all")
@@ -152,9 +164,10 @@ class QtMainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._busy_state_guard_timer.stop()
-        if self._metadata_save_timer.isActive():
-            self._metadata_save_timer.stop()
-            self._save_metadata_changes()
+        if self._table_layout_save_timer.isActive():
+            self._table_layout_save_timer.stop()
+        self._flush_pending_metadata_changes()
+        self._persist_current_table_layout()
         for worker in self._active_workers:
             worker.cancel()
         self._thread_pool.waitForDone(2000)
@@ -215,6 +228,99 @@ class QtMainWindow(QMainWindow):
             TOAST_EXPORT_SUCCESS_TEMPLATE.format(count=count, path=path),
             level="success",
         )
+
+    def _update_settings(self, **changes):
+        settings = replace(self.viewmodel.settings, **changes)
+        self.viewmodel.save_settings(settings)
+        return settings
+
+    def _apply_metadata_autosave_preferences(self) -> None:
+        interval_sec = max(1, int(self.viewmodel.settings.detail_autosave_interval_sec or 1))
+        self._metadata_save_timer.setInterval(interval_sec * 1000)
+        if not hasattr(self, "metadata_autosave_checkbox"):
+            return
+        self._updating_metadata_autosave_controls = True
+        try:
+            self.metadata_autosave_checkbox.setChecked(self.viewmodel.settings.detail_autosave_enabled)
+            self.metadata_autosave_interval_spin.setValue(interval_sec)
+            self.metadata_autosave_interval_spin.setEnabled(self.viewmodel.settings.detail_autosave_enabled)
+        finally:
+            self._updating_metadata_autosave_controls = False
+
+    def _on_metadata_autosave_preference_changed(self) -> None:
+        if self._updating_metadata_autosave_controls:
+            return
+        self._update_settings(
+            detail_autosave_enabled=self.metadata_autosave_checkbox.isChecked(),
+            detail_autosave_interval_sec=self.metadata_autosave_interval_spin.value(),
+        )
+        self._apply_metadata_autosave_preferences()
+        if self._metadata_is_dirty():
+            self._schedule_metadata_save()
+
+    def _apply_table_preferences(self) -> None:
+        self._table_model.set_column_keys(self.viewmodel.settings.list_columns)
+        if hasattr(self, "table"):
+            self._apply_table_column_layout()
+
+    def _apply_table_column_layout(self) -> None:
+        if not hasattr(self, "table"):
+            return
+        header = self.table.horizontalHeader()
+        self._applying_table_layout = True
+        header.blockSignals(True)
+        try:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header.setStretchLastSection(False)
+            for index, key in enumerate(self._table_model.column_keys()):
+                spec = literature_column_by_key(key)
+                width = self.viewmodel.settings.list_column_widths.get(key)
+                if width is None and spec is not None:
+                    width = spec.default_width
+                self.table.setColumnWidth(index, int(width or 120))
+        finally:
+            header.blockSignals(False)
+            self._applying_table_layout = False
+
+    def _capture_current_table_column_widths(self) -> dict[str, int]:
+        widths = dict(self.viewmodel.settings.list_column_widths)
+        if not hasattr(self, "table"):
+            return widths
+        for index, key in enumerate(self._table_model.column_keys()):
+            widths[key] = max(self.table.columnWidth(index), 40)
+        return widths
+
+    def _save_table_preferences(
+        self,
+        *,
+        column_keys: list[str] | None = None,
+        column_widths: dict[str, int] | None = None,
+    ) -> None:
+        changes = {}
+        if column_keys is not None:
+            changes["list_columns"] = list(column_keys)
+        if column_widths is not None:
+            changes["list_column_widths"] = dict(column_widths)
+        if changes:
+            self._update_settings(**changes)
+
+    def _persist_current_table_layout(self) -> None:
+        if not hasattr(self, "table"):
+            return
+        self._save_table_preferences(column_widths=self._capture_current_table_column_widths())
+
+    def _on_table_section_resized(self, _logical_index: int, _old_size: int, _new_size: int) -> None:
+        if self._applying_table_layout:
+            return
+        self._table_layout_save_timer.start()
+
+    def _flush_pending_metadata_changes(self) -> None:
+        if self._metadata_save_timer.isActive():
+            self._metadata_save_timer.stop()
+        if self._loading_metadata or self._current_literature_id is None:
+            return
+        if self._metadata_is_dirty():
+            self._save_metadata_changes()
 
     def _refresh_busy_state(self) -> None:
         if self._busy_tasks:
@@ -570,6 +676,10 @@ class QtMainWindow(QMainWindow):
         title = QLabel("文献列表")
         title.setObjectName("sectionTitle")
         header.addWidget(title)
+        self.column_settings_button = QPushButton("列设置", self)
+        self.column_settings_button.setObjectName("ghostButton")
+        self.column_settings_button.clicked.connect(self._open_column_settings)
+        header.addWidget(self.column_settings_button)
         header.addStretch(1)
 
         self.filter_pill = QLabel("全部文献")
@@ -591,9 +701,8 @@ class QtMainWindow(QMainWindow):
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.table.verticalScrollBar().valueChanged.connect(self._maybe_fetch_more_rows)
         header_view = self.table.horizontalHeader()
-        header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 7):
-            header_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header_view.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header_view.sectionResized.connect(self._on_table_section_resized)
         layout.addWidget(self.table, stretch=1)
         return card
     def _build_right_panel(self) -> QWidget:
@@ -638,10 +747,18 @@ class QtMainWindow(QMainWindow):
         self.lookup_metadata_button.clicked.connect(self._lookup_metadata)
         self.save_now_button = QPushButton("立即保存", self)
         self.save_now_button.clicked.connect(self._save_metadata_changes)
+        self.metadata_autosave_checkbox = QCheckBox("自动保存", self)
+        self.metadata_autosave_checkbox.toggled.connect(self._on_metadata_autosave_preference_changed)
+        self.metadata_autosave_interval_spin = QSpinBox(self)
+        self.metadata_autosave_interval_spin.setRange(1, 300)
+        self.metadata_autosave_interval_spin.setSuffix(" 秒")
+        self.metadata_autosave_interval_spin.valueChanged.connect(self._on_metadata_autosave_preference_changed)
         self.metadata_save_label = QLabel("已保存")
         self.metadata_save_label.setObjectName("mutedLabel")
         action_row.addWidget(self.lookup_metadata_button)
         action_row.addWidget(self.save_now_button)
+        action_row.addWidget(self.metadata_autosave_checkbox)
+        action_row.addWidget(self.metadata_autosave_interval_spin)
         action_row.addStretch(1)
         action_row.addWidget(self.metadata_save_label)
         outer_layout.addLayout(action_row)
@@ -982,6 +1099,7 @@ class QtMainWindow(QMainWindow):
         self.navigation_tree.blockSignals(False)
 
     def _refresh_table(self, search_text: str | None = None, preserve_id: int | None = None) -> None:
+        self._flush_pending_metadata_changes()
         rows = self.viewmodel.list_rows(
             search=search_text if search_text is not None else self.search_bar.text(),
             filters=self._active_filters,
@@ -1077,7 +1195,11 @@ class QtMainWindow(QMainWindow):
             self.metadata_save_label.setText("已保存")
             self._metadata_save_timer.stop()
             return
-        self.metadata_save_label.setText("即将保存…")
+        if not self.viewmodel.settings.detail_autosave_enabled:
+            self.metadata_save_label.setText("未保存")
+            self._metadata_save_timer.stop()
+            return
+        self.metadata_save_label.setText("即将自动保存…")
         self._metadata_save_timer.start()
 
     def _collect_metadata_payload(self) -> dict[str, object]:
@@ -1175,6 +1297,8 @@ class QtMainWindow(QMainWindow):
             return
         settings = dialog.value()
         self.viewmodel.save_settings(settings)
+        self._apply_metadata_autosave_preferences()
+        self._apply_table_preferences()
         self._apply_theme(settings.ui_theme)
         if dialog.request_install_umi:
             def handle_result(result) -> None:
@@ -1194,6 +1318,22 @@ class QtMainWindow(QMainWindow):
             )
             return
         self._show_toast("设置已保存", "已更新桌面偏好设置。", level="success")
+
+    def _open_column_settings(self) -> None:
+        self._persist_current_table_layout()
+        dialog = ColumnSettingsDialog(self._table_model.column_keys(), self)
+        if dialog.exec() == 0:
+            return
+        column_keys = dialog.selected_column_keys()
+        column_widths = self._capture_current_table_column_widths()
+        self._table_model.set_column_keys(column_keys)
+        self._save_table_preferences(column_keys=column_keys, column_widths=column_widths)
+        self._apply_table_column_layout()
+        if self._current_literature_id is not None:
+            self._select_row_for_literature(self._current_literature_id)
+        elif self._table_model.rowCount() > 0:
+            self.table.selectRow(0)
+        self._show_toast("列设置已保存", "已更新文献列表的显示列和列宽配置。", level="success")
 
     def _import_files(self) -> None:
         selected, _ = QFileDialog.getOpenFileNames(
@@ -1324,9 +1464,7 @@ class QtMainWindow(QMainWindow):
     def _refresh_literature_list(self) -> None:
         preserve_id = self._current_literature_id
         navigation_key = self._current_navigation_key()
-        if self._metadata_save_timer.isActive():
-            self._metadata_save_timer.stop()
-            self._save_metadata_changes()
+        self._flush_pending_metadata_changes()
 
         def handle_result(_result) -> None:
             self._show_toast("列表已刷新", "文献列表与统计信息已更新。", level="info")
@@ -2002,6 +2140,8 @@ class QtMainWindow(QMainWindow):
         select_note_id: int | None = None,
         select_attachment_id: int | None = None,
     ) -> None:
+        if literature_id != self._current_literature_id:
+            self._flush_pending_metadata_changes()
         self._current_literature_id = literature_id
         if literature_id is None:
             self.detail_title.setText("请选择一条文献记录")

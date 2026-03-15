@@ -212,6 +212,10 @@ class SettingsDialog(QDialog):
             update_repo=self.update_repo_edit.text().strip(),
             metadata_sources=selected_sources,
             preferred_export_template=str(self.export_template_combo.currentData()),
+            detail_autosave_enabled=self._original.detail_autosave_enabled,
+            detail_autosave_interval_sec=self._original.detail_autosave_interval_sec,
+            list_columns=list(self._original.list_columns),
+            list_column_widths=dict(self._original.list_column_widths),
         )
 
     def _on_metadata_source_toggled(self, source_key: str, checked: bool) -> None:

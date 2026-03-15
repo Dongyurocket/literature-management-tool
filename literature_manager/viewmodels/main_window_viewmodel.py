@@ -29,6 +29,16 @@ class LiteratureTableRow:
     subject: str
     reading_status: str
     attachment_count: int
+    note_count: int = 0
+    rating: int = 0
+    tags: str = ""
+    publication_title: str = ""
+    publisher: str = ""
+    language: str = ""
+    doi: str = ""
+    cite_key: str = ""
+    created_at: str = ""
+    updated_at: str = ""
 
 
 @dataclass(slots=True)
@@ -382,9 +392,30 @@ class MainWindowViewModel:
                 subject=str(row.get("subject", "")),
                 reading_status=str(row.get("reading_status", "")),
                 attachment_count=int(row.get("attachment_count", 0)),
+                note_count=int(row.get("note_count", 0)),
+                rating=int(row.get("rating") or 0),
+                tags=str(row.get("tags_display", "")),
+                publication_title=str(row.get("publication_title", "")),
+                publisher=str(row.get("publisher", "")),
+                language=str(row.get("language", "")),
+                doi=str(row.get("doi", "")),
+                cite_key=str(row.get("cite_key", "")),
+                created_at=self._format_table_timestamp(row.get("created_at")),
+                updated_at=self._format_table_timestamp(row.get("updated_at")),
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _format_table_timestamp(value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return text
+        return parsed.strftime("%Y-%m-%d %H:%M")
 
     def filter_summary(self, filters: FilterPayload | None = None) -> str:
         active_filters = dict(filters or {})
