@@ -24,18 +24,12 @@ def open_path(path: str, preferred_app: str = "") -> None:
     subprocess.Popen(["xdg-open", str(target)])
 
 
-def reveal_path(path: str) -> None:
+def open_parent_folder(path: str) -> None:
+    """Open the parent folder of *path* in the system file manager."""
     target = Path(path).expanduser()
     if not target.exists():
         raise FileNotFoundError(path)
     target = target.resolve()
-    if os.name == "nt":
-        normalized = os.path.normpath(str(target))
-        if target.is_file():
-            cmd = f'explorer /select,"{normalized}"'
-            _logger.debug("reveal_path command: %s", cmd)
-            subprocess.Popen(cmd)
-        else:
-            subprocess.Popen(["explorer", normalized])
-        return
-    open_path(str(target.parent if target.is_file() else target))
+    folder = target.parent if target.is_file() else target
+    _logger.debug("open_parent_folder: %s", folder)
+    open_path(str(folder))

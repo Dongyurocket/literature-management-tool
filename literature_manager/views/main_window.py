@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..config import APP_DISPLAY_NAME
-from ..desktop import open_path, reveal_path
+from ..desktop import open_parent_folder, open_path
 from ..metadata_fields import metadata_field_label, metadata_field_set, prune_metadata_payload
 from ..models import LiteratureTableModel
 from ..ocr_service import has_ocr_config
@@ -80,7 +80,7 @@ from .theme import apply_theme
 
 _logger = logging.getLogger(__name__)
 
-TOAST_SELECT_LITERATURE_MESSAGE = "请至少选择一条文献记录。"
+TOAST_SELECT_LITERATURE_MESSAGE = "请先在文献列表中选择一条或多条记录。"
 TOAST_EXPORT_SUCCESS_TEMPLATE = "已导出 {count} 条记录到 `{path}`。"
 TOAST_FILE_SAVED_TEMPLATE = "文件已保存到 `{path}`。"
 
@@ -1014,7 +1014,7 @@ class QtMainWindow(QMainWindow):
         add_button.clicked.connect(self._add_attachments)
         self.open_attachment_button = QPushButton("打开", self)
         self.open_attachment_button.clicked.connect(self._open_selected_attachment)
-        self.reveal_attachment_button = QPushButton("定位文件", self)
+        self.reveal_attachment_button = QPushButton("打开所在文件夹", self)
         self.reveal_attachment_button.clicked.connect(self._reveal_selected_attachment)
         self.delete_attachment_button = QPushButton("删除", self)
         self.delete_attachment_button.clicked.connect(self._delete_selected_attachment)
@@ -1527,7 +1527,7 @@ class QtMainWindow(QMainWindow):
         if not has_ocr_config(self.viewmodel.settings):
             self._show_toast(
                 "OCR 提取",
-                "请先在“设置”中选择或下载安装 Umi-OCR，然后再执行扫描版 PDF 识别。",
+                "请先在“设置 → OCR / 扫描版 PDF”中配置 Umi-OCR 路径，或点击“下载安装”获取。",
                 level="warning",
                 duration_ms=4200,
             )
@@ -1680,7 +1680,7 @@ class QtMainWindow(QMainWindow):
         references = self.viewmodel.build_gbt_references(literature_ids)
         text = "\n".join(reference for reference in references if reference)
         if not text.strip():
-            self._show_toast("复制 GB/T", "未生成可用的参考文献。", level="warning")
+            self._show_toast("复制 GB/T", "未生成可用的参考文献。\n请确保文献包含标题、作者等必填字段。", level="warning")
             return
         QApplication.clipboard().setText(text)
         self._show_toast("已复制", f"已复制 {len(references)} 条 GB/T 参考文献。", level="success")
@@ -1732,7 +1732,7 @@ class QtMainWindow(QMainWindow):
 
         def handle_groups(groups) -> None:
             if not groups:
-                self._show_toast("重复检测", "未发现重复文献组。", level="info")
+                self._show_toast("重复检测", "未发现重复文献组。", level="info", duration_ms=4200)
                 return
             dialog = DuplicateDialog(groups, self)
             if dialog.exec() == 0 or not dialog.result_payload:
@@ -1830,11 +1830,11 @@ class QtMainWindow(QMainWindow):
             return controller.repair_missing_paths(folder)
 
         def handle_result(result) -> None:
-            self._show_toast(
-                "修复完成",
-                f"已修复 {result['fixed']} 项，仍有 {result['unresolved']} 项未解决。",
-                level="success",
-            )
+            if result["unresolved"] > 0:
+                msg = f"已修复 {result['fixed']} 项，仍有 {result['unresolved']} 项未解决。\n请查看下方列表了解详情。"
+            else:
+                msg = f"已修复 {result['fixed']} 项，所有路径已恢复。"
+            self._show_toast("修复完成", msg, level="success")
             self._load_missing_paths()
 
         self._run_controller_task(
@@ -2063,14 +2063,14 @@ class QtMainWindow(QMainWindow):
     def _reveal_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
         if not attachment:
-            self._show_toast("定位附件", "请先选择一个附件。", level="warning")
+            self._show_toast("打开所在文件夹", "请先选择一个附件。", level="warning")
             return
         resolved = str(attachment["resolved_path"])
-        _logger.debug("Revealing attachment id=%s path=%s", self._current_attachment_id, resolved)
+        _logger.debug("Opening parent folder for attachment id=%s path=%s", self._current_attachment_id, resolved)
         try:
-            reveal_path(resolved)
+            open_parent_folder(resolved)
         except FileNotFoundError:
-            QMessageBox.warning(self, "定位附件", f"文件不存在：\n{resolved}")
+            QMessageBox.warning(self, "打开所在文件夹", f"文件不存在：\n{resolved}")
 
     def _delete_selected_attachment(self) -> None:
         if self._current_attachment_id is None:

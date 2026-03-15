@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -104,7 +105,7 @@ class RenamePreviewDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         for row, item in enumerate(previews):
-            status = "待重命名" if item.get("changed") else "无需修改"
+            status = "待重命名" if item.get("changed") else "无需修改（文件名已符合规则）"
             self.table.setItem(row, 0, QTableWidgetItem(item["old_path"]))
             self.table.setItem(row, 1, QTableWidgetItem(item["new_path"]))
             self.table.setItem(row, 2, QTableWidgetItem(status))
@@ -307,6 +308,9 @@ class SearchDialog(QDialog):
         self.table.itemDoubleClicked.connect(lambda _item: self._submit())
         layout.addWidget(self.table, stretch=1)
 
+        self.status_label = QLabel("")
+        layout.addWidget(self.status_label)
+
         buttons = QDialogButtonBox(parent=self)
         locate_button = buttons.addButton("定位到文献", QDialogButtonBox.ButtonRole.AcceptRole)
         close_button = buttons.addButton(QDialogButtonBox.StandardButton.Close)
@@ -315,7 +319,11 @@ class SearchDialog(QDialog):
         layout.addWidget(buttons)
 
     def _search(self) -> None:
-        rows = self._search_literatures(self.query_edit.text().strip())
+        query = self.query_edit.text().strip()
+        if not query:
+            self.status_label.setText("请输入搜索关键词。")
+            return
+        rows = self._search_literatures(query)
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             values = [
@@ -331,6 +339,9 @@ class SearchDialog(QDialog):
                 self.table.setItem(row_index, column, cell)
         if rows:
             self.table.selectRow(0)
+            self.status_label.setText(f"找到 {len(rows)} 条匹配结果。")
+        else:
+            self.status_label.setText(f'未找到匹配 "{query}" 的结果。')
 
     def _submit(self) -> None:
         row = self.table.currentRow()
@@ -508,6 +519,8 @@ class ImportCenterDialog(QDialog):
             self._load_sources([folder])
 
     def _load_sources(self, paths: list[str]) -> None:
+        self.status_label.setText("正在扫描，请稍候…")
+        QApplication.processEvents()
         self.items = scan_import_sources(paths, settings=self.settings)
         self.table.setRowCount(len(self.items))
         for row, item in enumerate(self.items):
@@ -534,7 +547,10 @@ class ImportCenterDialog(QDialog):
             ]
             for column, value in enumerate(values, start=1):
                 self.table.setItem(row, column, QTableWidgetItem(str(value)))
-        self.status_label.setText(f"共扫描到 {len(self.items)} 条可导入记录。")
+        if self.items:
+            self.status_label.setText(f"共扫描到 {len(self.items)} 个可导入项。")
+        else:
+            self.status_label.setText("未找到可导入的内容。")
 
     def _submit(self) -> None:
         if not self.items:

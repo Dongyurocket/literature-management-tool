@@ -7,46 +7,46 @@ from literature_manager import desktop
 
 
 class DesktopTests(unittest.TestCase):
-    def test_reveal_path_uses_windows_select_argument_for_files(self):
+    def test_open_parent_folder_opens_parent_for_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "sample.pdf"
             target.write_text("test", encoding="utf-8")
 
             with (
                 mock.patch.object(desktop.os, "name", "nt"),
-                mock.patch.object(desktop.subprocess, "Popen") as popen,
+                mock.patch.object(desktop.os, "startfile", create=True) as startfile,
             ):
-                desktop.reveal_path(str(target))
+                desktop.open_parent_folder(str(target))
 
-            normalized = desktop.os.path.normpath(str(target.resolve()))
-            popen.assert_called_once_with(f'explorer /select,"{normalized}"')
+            parent_dir = str(target.resolve().parent)
+            startfile.assert_called_once_with(parent_dir)
 
-    def test_reveal_path_opens_directory_on_windows(self):
+    def test_open_parent_folder_opens_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
 
             with (
                 mock.patch.object(desktop.os, "name", "nt"),
-                mock.patch.object(desktop.subprocess, "Popen") as popen,
+                mock.patch.object(desktop.os, "startfile", create=True) as startfile,
             ):
-                desktop.reveal_path(str(target))
+                desktop.open_parent_folder(str(target))
 
-            popen.assert_called_once_with(["explorer", desktop.os.path.normpath(str(target.resolve()))])
+            startfile.assert_called_once_with(str(target.resolve()))
 
-    def test_reveal_path_raises_for_missing_target(self):
+    def test_open_parent_folder_raises_for_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "missing.pdf"
 
             with (
                 mock.patch.object(desktop.os, "name", "nt"),
-                mock.patch.object(desktop.subprocess, "Popen") as popen,
+                mock.patch.object(desktop.os, "startfile", create=True) as startfile,
             ):
                 with self.assertRaises(FileNotFoundError):
-                    desktop.reveal_path(str(target))
+                    desktop.open_parent_folder(str(target))
 
-            popen.assert_not_called()
+            startfile.assert_not_called()
 
-    def test_reveal_path_handles_spaces_in_path(self):
+    def test_open_parent_folder_handles_spaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             spaced_dir = Path(tmp) / "my library"
             spaced_dir.mkdir()
@@ -55,14 +55,14 @@ class DesktopTests(unittest.TestCase):
 
             with (
                 mock.patch.object(desktop.os, "name", "nt"),
-                mock.patch.object(desktop.subprocess, "Popen") as popen,
+                mock.patch.object(desktop.os, "startfile", create=True) as startfile,
             ):
-                desktop.reveal_path(str(target))
+                desktop.open_parent_folder(str(target))
 
-            normalized = desktop.os.path.normpath(str(target.resolve()))
-            popen.assert_called_once_with(f'explorer /select,"{normalized}"')
+            parent_dir = str(target.resolve().parent)
+            startfile.assert_called_once_with(parent_dir)
 
-    def test_reveal_path_handles_chinese_characters(self):
+    def test_open_parent_folder_handles_chinese(self):
         with tempfile.TemporaryDirectory() as tmp:
             cn_dir = Path(tmp) / "文献库"
             cn_dir.mkdir()
@@ -71,12 +71,12 @@ class DesktopTests(unittest.TestCase):
 
             with (
                 mock.patch.object(desktop.os, "name", "nt"),
-                mock.patch.object(desktop.subprocess, "Popen") as popen,
+                mock.patch.object(desktop.os, "startfile", create=True) as startfile,
             ):
-                desktop.reveal_path(str(target))
+                desktop.open_parent_folder(str(target))
 
-            normalized = desktop.os.path.normpath(str(target.resolve()))
-            popen.assert_called_once_with(f'explorer /select,"{normalized}"')
+            parent_dir = str(target.resolve().parent)
+            startfile.assert_called_once_with(parent_dir)
 
 
 if __name__ == "__main__":

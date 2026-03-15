@@ -323,12 +323,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.1
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.2
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.7.1-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.7.2-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -360,6 +360,20 @@ python -m compileall main.py literature_manager
 ## 更新日志
 
 <details open>
+<summary><b>V0.7.2</b> — 打开所在文件夹与工具箱 UX 优化</summary>
+
+- 附件区"定位文件"改为"打开所在文件夹"，直接打开文件所在目录，不再依赖 `explorer /select,`
+- 未选择文献时的 toast 提示更明确："请先在文献列表中选择一条或多条记录。"
+- 全文检索：空查询拦截 + 零结果 / 有结果状态反馈
+- 复制 GB/T：生成失败时提示检查标题、作者等必填字段
+- OCR 提取：未配置时引导到"设置 → OCR / 扫描版 PDF"
+- PDF 重命名预览：无需修改项标注"文件名已符合规则"
+- 维护工具-路径修复：修复完成后区分"全部恢复"与"仍有未解决项"
+- 重复检测：零结果 toast 停留时长加长
+- 导入中心：扫描前显示"正在扫描，请稍候…"，扫描后区分有结果 / 无结果
+</details>
+
+<details>
 <summary><b>V0.7.1</b> — 资源管理器定位修复与附件交互优化</summary>
 
 - 修复"定位文件"打开错误位置：`reveal_path` 改用字符串格式调用 `explorer /select,`，解决路径含空格时 Python `list2cmdline` 引号包裹导致 Explorer 无法识别 `/select,` 标志的问题
