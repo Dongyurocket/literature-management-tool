@@ -11,6 +11,16 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
+## V0.3.5 热修复
+
+这一版聚焦 Windows 安装包启动稳定性，修复部分打包结果里 `PIL` 包不完整，导致程序启动时直接报错 `module 'PIL' has no attribute '__version__'` 的问题。
+
+- `metadata_service` 在导入 `pypdf` 前增加兼容保护，避免不完整的 `PIL` 模块触发启动异常
+- 打包规格文件显式收集完整的 `Pillow / PIL` 模块内容，避免 PyInstaller 只带入二进制扩展却遗漏 `__init__.py`
+- 运行时依赖补充 `Pillow`，保证源码安装、本地打包、CI 发布环境一致
+- 新增回归测试，覆盖“`PIL` 模块存在但缺少 `__version__`”场景
+- 已完成全量测试、Windows 安装包重打包与启动烟雾验证
+
 ## V0.3.4 更新
 
 这一版聚焦工程化体验和桌面版稳定性，补齐开发依赖安装入口，并继续优化数据库、MVVM 分层和后台任务处理。
@@ -446,19 +456,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.4
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.5
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.3.4-Setup.exe`：带中文安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.3.5-Setup.exe`：带中文安装向导的 Windows 安装包
 
 当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.3.4` 的标签时：
+当推送形如 `v0.3.5` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -497,15 +507,14 @@ python -m pytest -q
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.3.4）
+## 当前版本亮点（V0.3.5）
 
-- 开发环境支持 `python -m pip install -e ".[dev]"` 一键安装测试和打包依赖
-- 数据库默认启用 `WAL`，并增加筛选字段索引，提升并发与查询稳定性
-- 文献列表聚合统计附件数和笔记数，减少列表刷新时的数据库压力
-- 主窗口通过 ViewModel 路由保存、新建、删除逻辑，MVVM 分层更清晰
-- 元数据编辑页增加脏检查，未变更内容不再重复写入数据库
-- 异步任务错误改为结构化返回，界面侧提示更稳定
-- 全量 `unittest` 共 `49` 项通过
+- 修复部分安装包启动即崩溃的问题，兼容 `PIL` 模块缺少 `__version__` 的异常场景
+- 打包时显式收集完整 `Pillow / PIL` 文件，避免 PyInstaller 生成残缺包目录
+- 运行时依赖补充 `Pillow`，让本地开发、CI 打包、Release 产物保持一致
+- 保留 `dev` extra 一键安装测试和打包依赖的能力
+- 数据库、MVVM、异步任务等 `V0.3.4` 稳定性改进继续保留
+- 全量 `unittest` / `pytest` 现已验证 `50` 项通过
 
 ## 已知限制
 

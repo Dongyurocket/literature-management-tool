@@ -1,13 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 hiddenimports = collect_submodules("pypdf")
+pillow_datas, pillow_binaries, pillow_hiddenimports = collect_all("PIL")
+hiddenimports += pillow_hiddenimports
 
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=pillow_binaries,
+    datas=pillow_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

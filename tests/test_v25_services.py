@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -198,6 +201,33 @@ class MetadataProviderParsingTests(unittest.TestCase):
 
 
 class OcrAndUpdateTests(unittest.TestCase):
+    def test_metadata_service_import_tolerates_pil_without_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pil_dir = Path(tmp) / "PIL"
+            pil_dir.mkdir()
+            (pil_dir / "__init__.py").write_text("", encoding="utf-8")
+
+            env = os.environ.copy()
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                tmp if not existing_pythonpath else os.pathsep.join([tmp, existing_pythonpath])
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import literature_manager.metadata_service; import PIL; print(PIL.__version__)",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "unknown")
+
     def test_extract_pdf_text_with_ocr_returns_original_when_no_command(self):
         settings = AppSettings()
         self.assertEqual(extract_pdf_text_with_ocr("demo.pdf", "short text", settings), "short text")

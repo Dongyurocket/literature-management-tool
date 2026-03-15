@@ -7,6 +7,14 @@ import ssl
 from pathlib import Path
 from urllib import error, parse, request
 
+try:
+    import PIL
+except ImportError:
+    PIL = None
+else:
+    if not hasattr(PIL, "__version__"):
+        PIL.__version__ = "unknown"
+
 from pypdf import PdfReader
 
 from . import __version__
