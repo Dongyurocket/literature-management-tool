@@ -4,6 +4,10 @@
 </h1>
 
 <p align="center">
+  <img src="docs/assets/readme-banner.svg" width="100%" alt="文献管理工具 Banner">
+</p>
+
+<p align="center">
   <strong>本地优先的桌面文献管理软件，为中文学术场景而生</strong>
 </p>
 
@@ -13,6 +17,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
+  <img src="https://img.shields.io/badge/storage-local--first-1f8f6a?style=flat-square" alt="Local First">
   <img src="https://img.shields.io/badge/tests-70%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
@@ -22,20 +27,63 @@
   <a href="https://github.com/Dongyurocket/literature-management-tool/issues">问题反馈</a>
 </p>
 
+<p align="center">
+  <a href="#overview">项目概览</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#workflow">工作流</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#features">功能亮点</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#screenshots">界面预览</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#quick-start">快速开始</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#architecture">技术架构</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="CHANGELOG.md">更新日志</a>
+</p>
+
 ---
+
+<a id="overview"></a>
 
 面向研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。使用 **Python + PySide6 + SQLite + pypdf** 构建，默认本地存储，无需服务器，开箱即用。
 
-<br>
+<table>
+<tr>
+<td align="center" width="25%">
+  <strong>8 个元数据源</strong><br>
+  <sub>支持 DOI / ISBN / 标题补全与顺序回退</sub>
+</td>
+<td align="center" width="25%">
+  <strong>9 类文献类型</strong><br>
+  <sub>覆盖常见中文学术写作与 GB/T 7714 场景</sub>
+</td>
+<td align="center" width="25%">
+  <strong>3 种导入方式</strong><br>
+  <sub>copy / move / link，适配不同资料整理习惯</sub>
+</td>
+<td align="center" width="25%">
+  <strong>70 项自动化测试</strong><br>
+  <sub>可用 `pytest` 与 `unittest` 双模式运行</sub>
+</td>
+</tr>
+</table>
 
-<p align="center">
-  <img src="docs/screenshots/v0.3.2-main-window.png" width="90%" alt="主界面预览">
-</p>
+> 适合希望把文献库、附件、笔记、OCR 与导出流程统一在本地桌面应用中的用户。
 
-<p align="center"><sub>主界面：导航树 · 文献列表 · 元数据编辑 · 工具箱</sub></p>
+<a id="workflow"></a>
+## 工作流一图看懂
+
+```mermaid
+flowchart LR
+    A["拖入 PDF / BibTeX / RIS / DOCX / Markdown / TXT"] --> B["扫描导入中心"]
+    B --> C["建档并关联附件 / 笔记"]
+    C --> D["8 个元数据源补全"]
+    D --> E["编辑字段 / 阅读状态 / 标签"]
+    E --> F["全文检索 / 去重 / OCR / 统计 / 维护"]
+    F --> G["BibTeX / CSL JSON / GB/T / Markdown / CSV / HTML 导出"]
+```
+
+<p align="center"><sub>默认源顺序：Crossref -&gt; DataCite -&gt; OpenAlex -&gt; 知网 -&gt; USTC OpenURL -&gt; Tsinghua OpenURL -&gt; OpenLibrary -&gt; Google Books</sub></p>
 
 ---
 
+<a id="features"></a>
 ## 功能亮点
 
 <table>
@@ -89,6 +137,7 @@
 
 ---
 
+<a id="quick-start"></a>
 ## 快速开始
 
 ### 方式一：下载安装包（推荐）
@@ -114,17 +163,24 @@ python -m pip install -e ".[dev]"
 
 ---
 
+<a id="screenshots"></a>
 ## 界面预览
 
 <table>
 <tr>
 <td align="center" width="60%">
-  <img src="docs/screenshots/v0.3.2-main-window.png" alt="主界面">
-  <br><sub>主界面 — 导航、列表、详情编辑</sub>
+  <img src="docs/screenshots/v0.7.2-main-window.png" alt="主界面">
+  <br><sub>主界面 - 导航、列表、详情编辑</sub>
 </td>
 <td align="center" width="40%">
-  <img src="docs/screenshots/v0.3.2-settings.png" alt="设置页">
-  <br><sub>设置页 — 元数据源、OCR、更新</sub>
+  <img src="docs/screenshots/v0.7.2-settings.png" alt="设置页">
+  <br><sub>设置页 - 文库目录、导入方式、OCR、元数据源、更新</sub>
+</td>
+</tr>
+<tr>
+<td align="center" colspan="2">
+  <img src="docs/screenshots/v0.7.2-update-dialog.png" width="72%" alt="检查更新">
+  <br><sub>检查更新 - 软件内展示 Release 信息与版本说明</sub>
 </td>
 </tr>
 </table>
@@ -285,7 +341,19 @@ Literature management tool/
 
 ---
 
+<a id="architecture"></a>
 ## 技术架构
+
+```mermaid
+flowchart TB
+    A["PySide6 Views"] --> B["ViewModels"]
+    B --> C["Controllers"]
+    C --> D["SQLite / library.sqlite3"]
+    C --> E["Metadata Service"]
+    C --> F["Import / Export / Dedupe Service"]
+    C --> G["OCR / Update / Maintenance Service"]
+    C --> H["Desktop Integration"]
+```
 
 ```
 literature_manager/
@@ -359,125 +427,9 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-<details open>
-<summary><b>V0.7.2</b> — 打开所在文件夹与工具箱 UX 优化</summary>
-
-- 附件区"定位文件"改为"打开所在文件夹"，直接打开文件所在目录，不再依赖 `explorer /select,`
-- 未选择文献时的 toast 提示更明确："请先在文献列表中选择一条或多条记录。"
-- 全文检索：空查询拦截 + 零结果 / 有结果状态反馈
-- 复制 GB/T：生成失败时提示检查标题、作者等必填字段
-- OCR 提取：未配置时引导到"设置 → OCR / 扫描版 PDF"
-- PDF 重命名预览：无需修改项标注"文件名已符合规则"
-- 维护工具-路径修复：修复完成后区分"全部恢复"与"仍有未解决项"
-- 重复检测：零结果 toast 停留时长加长
-- 导入中心：扫描前显示"正在扫描，请稍候…"，扫描后区分有结果 / 无结果
-</details>
-
-<details>
-<summary><b>V0.7.1</b> — 资源管理器定位修复与附件交互优化</summary>
-
-- 修复"定位文件"打开错误位置：`reveal_path` 改用字符串格式调用 `explorer /select,`，解决路径含空格时 Python `list2cmdline` 引号包裹导致 Explorer 无法识别 `/select,` 标志的问题
-- 修复 `resolve_path` 路径对称性：拼接时统一使用 `root.resolve()`，与 `_store_path` 基准一致
-- 未选中附件时点击"打开"或"定位文件"改为 toast 提示，不再静默失败
-- 附件选中状态与按钮启禁联动，取消选中后禁用操作按钮
-- 新增路径含空格、中文字符的定位测试用例
-</details>
-
-<details>
-<summary><b>V0.7.0</b> — 附件定位修复与交互增强</summary>
-
-- 修复附件"定位文件"功能失效：加载附件列表时增加守卫标志，防止 Qt 信号在清空/添加过程中错误重置当前选中 ID
-- 新增 `_select_attachment_item` 辅助方法，附件选中逻辑与笔记保持一致
-- 绝对路径附件也调用 `.resolve()` 统一路径解析
-- 附件列表只显示文件名，悬停显示完整路径（tooltip）
-- 无附件时显示空状态提示文字
-- 双击附件列表项直接打开文件
-- Delete 键快捷删除附件（作用域限定在附件列表）
-- 删除附件后自动选中相邻项
-</details>
-
-<details>
-<summary><b>V0.6.2</b> — 附件定位文件修复</summary>
-
-- 修复 Windows 下“附件 -> 定位文件”不能正确选中目标文件的问题
-- 统一改为使用正确的 `explorer /select,<path>` 调用格式，目录和文件的打开行为分开处理
-- 增加附件定位相关回归测试，覆盖文件定位、目录打开和缺失文件提示场景
-</details>
-
-<details>
-<summary><b>V0.6.1</b> — 详细信息保存策略与列表列配置升级</summary>
-
-- 详细信息区改为“立即保存 + 自动保存”并存，新增自动保存开关与保存间隔设置
-- 自动保存关闭后，编辑中会明确显示“未保存”，切换记录、刷新列表或关闭窗口前会补做一次保存，降低内容丢失风险
-- 文献列表新增“列设置”，可自由选择显示哪些列、调整列顺序，并持久化记录列宽
-</details>
-
-<details>
-<summary><b>V0.6.0</b> — GB/T 7714 元数据字段补全</summary>
-
-- 元数据模型补齐 GB/T 7714-2015 所需字段，新增副标题、编者、译者、出版地、机构、会议地点、学位类别、版次、报告号、访问日期等字段
-- 元数据编辑区改为按文献类型动态显示，只保留当前类型需要填写的字段，并在切换类型时自动清理不适用内容
-- 抓取、预览、合并、BibTeX / RIS 解析、GB/T / CSL 导出全部兼容上述字段扩展，抓取后仍可正确落入对应类型字段
-</details>
-
-<details>
-<summary><b>V0.5.1</b> — 更新提示文案与时间显示优化</summary>
-
-- 检查更新走备用通道时，不再展示 HTTP 403 等技术细节，统一改为更易理解的中文提示
-- Release 发布时间改为按本机时区显示，本地查看时可直接看到形如 `2026-03-15 15:54:49` 的时间
-- 保留备用通道回退能力，受限网络下仍可继续完成版本检查
-</details>
-
-<details>
-<summary><b>V0.5.0</b> — 后台任务稳定性与发布整理</summary>
-
-- 主窗口关闭时会主动取消后台任务、等待线程池收尾，并补做未落盘的元数据保存
-- 同名后台任务增加去重保护，取消后的任务结果不再回写 UI，减少重复点击和退出时的异常提示
-- PDF 元数据读取、PDF 文本抽取、Umi-OCR 探测与 OCR 回退流程增加日志，便于定位打包环境或用户现场问题
-- README 重写为面向发布的中文说明，补齐安装、打包、测试与 Release 流程文档
-</details>
-
-<details>
-<summary><b>V0.4.0</b> — 元数据源有序回退</summary>
-
-- 设置页恢复元数据源多选，可自由勾选并排列回退优先级
-- 元数据抓取按配置顺序逐一尝试，命中即停
-- 保留来源顺序保存逻辑，重开设置后不丢失优先级配置
-- 延续 v0.3.5 的安装包启动修复和 Pillow 兼容性改进
-</details>
-
-<details>
-<summary><b>V0.3.5</b> — 启动稳定性热修复</summary>
-
-- 修复 PIL 模块不完整导致 `module 'PIL' has no attribute '__version__'` 启动崩溃
-- 打包规格文件显式收集完整的 Pillow / PIL 模块
-- 运行时依赖补充 Pillow
-</details>
-
-<details>
-<summary><b>V0.3.4</b> — 开发体验与数据库优化</summary>
-
-- 新增 `dev` extra，一次安装开发、测试和打包依赖
-- SQLite 启用 WAL，增加 year / subject / reading_status 索引
-- ViewModel 新增元数据保存等封装，降低 View 对 Controller 的耦合
-- 元数据页增加脏检查，未改动时不触发写库
-</details>
-
-<details>
-<summary><b>V0.3.3</b> — 更新检查稳定性</summary>
-
-- 检查更新支持 API 403 / 429 时自动回退到 Release 网页解析
-- 支持 GITHUB_TOKEN / GH_TOKEN 提升受限网络成功率
-</details>
-
-<details>
-<summary><b>V0.3.2</b> — 列表刷新与状态恢复</summary>
-
-- 文献列表刷新（按钮 + F5 快捷键）
-- 后台任务状态守护，异常残留自动恢复
-- 元数据合并优化：替换占位标题、作者去重、关键词去重
-- 引用键支持手动编辑并自动保存
-</details>
+- 最新版本 `v0.7.2` 主要聚焦工具箱 UX、全文检索反馈、OCR / PDF 重命名提示，以及更新窗口展示优化。
+- 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
+- 早期中文发布说明可参考 `docs/releases/`。
 
 ---
 

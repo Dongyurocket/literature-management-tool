@@ -1,0 +1,88 @@
+<svg width="1600" height="520" viewBox="0 0 1600 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Literature Management Tool banner</title>
+  <desc id="desc">A blue banner with a logo mark and feature labels for the Literature Management Tool project.</desc>
+  <defs>
+    <linearGradient id="bg" x1="140" y1="48" x2="1478" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1F35"/>
+      <stop offset="0.55" stop-color="#123E70"/>
+      <stop offset="1" stop-color="#0C6BA6"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="292" y1="118" x2="480" y2="306" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5DD4FF"/>
+      <stop offset="1" stop-color="#1F8F6A"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="1154" y1="282" x2="1368" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD37A"/>
+      <stop offset="1" stop-color="#FF9E57"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="24" y="24" width="1552" height="472" rx="34" fill="url(#bg)"/>
+  <circle cx="1360" cy="122" r="108" fill="#7BD8FF" opacity="0.10"/>
+  <circle cx="1236" cy="380" r="136" fill="#FFC978" opacity="0.08"/>
+  <circle cx="232" cy="102" r="64" fill="#74D2FF" opacity="0.12"/>
+
+  <g opacity="0.12" stroke="#DDEEFF">
+    <path d="M113 130H1487"/>
+    <path d="M113 196H1487"/>
+    <path d="M113 262H1487"/>
+    <path d="M113 328H1487"/>
+    <path d="M113 394H1487"/>
+  </g>
+
+  <g opacity="0.12" stroke="#DDEEFF">
+    <path d="M212 70V450"/>
+    <path d="M322 70V450"/>
+    <path d="M432 70V450"/>
+    <path d="M542 70V450"/>
+    <path d="M652 70V450"/>
+  </g>
+
+  <rect x="86" y="86" width="432" height="348" rx="30" fill="#0E2745" fill-opacity="0.82" stroke="#D4E7FF" stroke-opacity="0.14"/>
+
+  <circle cx="214" cy="186" r="72" fill="url(#accent)"/>
+  <circle cx="214" cy="186" r="55" fill="#0D2846" fill-opacity="0.78"/>
+  <path d="M178 160H214V214H178V160Z" fill="#F7FBFF"/>
+  <path d="M214 152H250V206H214V152Z" fill="#D6F2FF"/>
+  <path d="M193 172H235" stroke="#0D2846" stroke-width="10" stroke-linecap="round"/>
+  <path d="M193 194H228" stroke="#0D2846" stroke-width="10" stroke-linecap="round"/>
+  <path d="M244 214L271 241" stroke="#FFD37A" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="230" cy="200" r="32" stroke="#FFD37A" stroke-width="12"/>
+
+  <text x="118" y="302" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="48" font-weight="700">LM</text>
+  <text x="118" y="346" fill="#B9D8F5" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600" letter-spacing="2">LOCAL-FIRST DESKTOP</text>
+  <text x="118" y="382" fill="#D7E8FA" font-family="Segoe UI, Arial, sans-serif" font-size="18">Metadata, notes, OCR and export</text>
+
+  <text x="580" y="164" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="66" font-weight="700">Literature Management Tool</text>
+  <text x="580" y="216" fill="#CAE1F8" font-family="Segoe UI, Arial, sans-serif" font-size="28">A local-first workflow for Chinese academic reference management</text>
+
+  <rect x="580" y="256" width="156" height="46" rx="23" fill="#F2F7FF" fill-opacity="0.12" stroke="#F2F7FF" stroke-opacity="0.16"/>
+  <text x="610" y="286" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600">PySide6</text>
+
+  <rect x="752" y="256" width="126" height="46" rx="23" fill="#F2F7FF" fill-opacity="0.12" stroke="#F2F7FF" stroke-opacity="0.16"/>
+  <text x="784" y="286" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600">SQLite</text>
+
+  <rect x="894" y="256" width="154" height="46" rx="23" fill="#F2F7FF" fill-opacity="0.12" stroke="#F2F7FF" stroke-opacity="0.16"/>
+  <text x="924" y="286" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600">GB/T 7714</text>
+
+  <rect x="1064" y="256" width="94" height="46" rx="23" fill="#F2F7FF" fill-opacity="0.12" stroke="#F2F7FF" stroke-opacity="0.16"/>
+  <text x="1095" y="286" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600">OCR</text>
+
+  <rect x="1174" y="256" width="170" height="46" rx="23" fill="#F2F7FF" fill-opacity="0.12" stroke="#F2F7FF" stroke-opacity="0.16"/>
+  <text x="1204" y="286" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="600">BibTeX / CSL</text>
+
+  <rect x="580" y="330" width="244" height="110" rx="26" fill="#F7FBFF" fill-opacity="0.10" stroke="#F7FBFF" stroke-opacity="0.15"/>
+  <text x="614" y="374" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Multi-source metadata</text>
+  <text x="614" y="408" fill="#D8E8F9" font-family="Segoe UI, Arial, sans-serif" font-size="18">Crossref, DataCite, OpenAlex,</text>
+  <text x="614" y="434" fill="#D8E8F9" font-family="Segoe UI, Arial, sans-serif" font-size="18">CNKI, OpenURL, OpenLibrary</text>
+
+  <rect x="852" y="330" width="212" height="110" rx="26" fill="#F7FBFF" fill-opacity="0.10" stroke="#F7FBFF" stroke-opacity="0.15"/>
+  <text x="886" y="374" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">File workflow</text>
+  <text x="886" y="408" fill="#D8E8F9" font-family="Segoe UI, Arial, sans-serif" font-size="18">copy / move / link</text>
+  <text x="886" y="434" fill="#D8E8F9" font-family="Segoe UI, Arial, sans-serif" font-size="18">PDF, notes, OCR, repair</text>
+
+  <rect x="1092" y="330" width="274" height="110" rx="26" fill="#0E2745" fill-opacity="0.42" stroke="url(#warm)" stroke-opacity="0.55"/>
+  <text x="1128" y="374" fill="#FFF4D8" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Export ready</text>
+  <text x="1128" y="408" fill="#FFE4B0" font-family="Segoe UI, Arial, sans-serif" font-size="18">GB/T, Markdown, CSV, HTML,</text>
+  <text x="1128" y="434" fill="#FFE4B0" font-family="Segoe UI, Arial, sans-serif" font-size="18">statistics and reference formats</text>
+</svg>
