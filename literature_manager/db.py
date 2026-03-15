@@ -762,7 +762,7 @@ class LibraryDatabase:
             if not root:
                 return Path(stored_path)
             return (root / stored_path).resolve()
-        return Path(stored_path)
+        return Path(stored_path).resolve()
 
     def _extract_attachment_text(self, path: Path) -> str:
         suffix = path.suffix.lower()

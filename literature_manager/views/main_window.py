@@ -126,6 +126,7 @@ class QtMainWindow(QMainWindow):
         self._loading_metadata = False
         self._metadata_snapshot: dict[str, object] | None = None
         self._loading_notes = False
+        self._loading_attachments = False
         self._maintenance_dialog: MaintenanceDialog | None = None
         self._active_workers: list[AsyncWorker] = []
         self._active_task_labels: set[str] = set()
@@ -1029,6 +1030,10 @@ class QtMainWindow(QMainWindow):
 
         self.attachments_list = QListWidget(self)
         self.attachments_list.currentItemChanged.connect(self._on_attachment_selected)
+        self.attachments_list.itemDoubleClicked.connect(self._on_attachment_double_clicked)
+        delete_shortcut = QShortcut(QKeySequence("Delete"), self.attachments_list)
+        delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        delete_shortcut.activated.connect(self._delete_selected_attachment)
         layout.addWidget(self.attachments_list, stretch=1)
 
         self.attachments_info_label = QLabel("打开 PDF 时会优先使用设置中的阅读器，其他文件则使用系统默认程序。")
@@ -2076,13 +2081,21 @@ class QtMainWindow(QMainWindow):
         )
         if answer == QMessageBox.StandardButton.Cancel:
             return
+        current_row = self.attachments_list.currentRow()
+        total_count = self.attachments_list.count()
+        next_id: int | None = None
+        if total_count > 1:
+            next_row = current_row + 1 if current_row < total_count - 1 else current_row - 1
+            next_item = self.attachments_list.item(next_row)
+            if next_item is not None:
+                next_id = next_item.data(Qt.ItemDataRole.UserRole)
         self.viewmodel.delete_attachment(
             self._current_attachment_id,
             delete_file=answer == QMessageBox.StandardButton.Yes,
         )
         self._refresh_stats()
         self._refresh_table(preserve_id=self._current_literature_id)
-        self._show_detail(self._current_literature_id)
+        self._show_detail(self._current_literature_id, select_attachment_id=next_id)
         self._show_toast("附件已删除", "已删除所选附件。", level="success")
 
     def _on_search_requested(self, text: str) -> None:
@@ -2128,7 +2141,15 @@ class QtMainWindow(QMainWindow):
             self._populate_note_editor(note_id)
 
     def _on_attachment_selected(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
+        if self._loading_attachments:
+            return
         self._current_attachment_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+
+    def _on_attachment_double_clicked(self, item: QListWidgetItem) -> None:
+        attachment_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(attachment_id, int):
+            self._current_attachment_id = attachment_id
+            self._open_selected_attachment()
 
     def _maybe_fetch_more_rows(self, value: int) -> None:
         if value >= self.table.verticalScrollBar().maximum() - 4:
@@ -2301,6 +2322,17 @@ class QtMainWindow(QMainWindow):
                 self._populate_note_editor(note_id)
                 return
 
+    def _select_attachment_item(self, attachment_id: int) -> None:
+        for row in range(self.attachments_list.count()):
+            item = self.attachments_list.item(row)
+            if item.data(Qt.ItemDataRole.UserRole) == attachment_id:
+                self.attachments_list.setCurrentItem(item)
+                self._current_attachment_id = attachment_id
+                self.open_attachment_button.setEnabled(True)
+                self.reveal_attachment_button.setEnabled(True)
+                self.delete_attachment_button.setEnabled(True)
+                return
+
     def _populate_note_editor(self, note_id: int) -> None:
         note = self.viewmodel.get_note(note_id)
         if not note:
@@ -2334,33 +2366,36 @@ class QtMainWindow(QMainWindow):
         return self.viewmodel.get_note(self._current_note_id)
 
     def _load_attachments(self, attachments: list[dict], *, select_attachment_id: int | None = None) -> None:
+        self._loading_attachments = True
         self.attachments_list.clear()
-        self._current_attachment_id = None
         for attachment in attachments:
+            resolved = attachment.get("resolved_path", "")
+            filename = Path(resolved).name if resolved else ""
             text = " | ".join(
                 part
                 for part in [
                     attachment.get("label", ""),
                     ROLE_LABELS.get(attachment.get("role", ""), attachment.get("role", "")),
                     attachment.get("language", ""),
-                    attachment.get("resolved_path", ""),
+                    filename,
                 ]
                 if part
             )
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, int(attachment["id"]))
+            item.setToolTip(resolved)
             self.attachments_list.addItem(item)
+        self._loading_attachments = False
         if attachments:
             target = select_attachment_id or int(attachments[0]["id"])
-            for row in range(self.attachments_list.count()):
-                item = self.attachments_list.item(row)
-                if item.data(Qt.ItemDataRole.UserRole) == target:
-                    self.attachments_list.setCurrentItem(item)
-                    self._current_attachment_id = target
-                    break
-        self.open_attachment_button.setEnabled(bool(attachments))
-        self.reveal_attachment_button.setEnabled(bool(attachments))
-        self.delete_attachment_button.setEnabled(bool(attachments))
+            self._select_attachment_item(target)
+            self.attachments_info_label.setText("打开 PDF 时会优先使用设置中的阅读器，其他文件则使用系统默认程序。")
+        else:
+            self._current_attachment_id = None
+            self.open_attachment_button.setEnabled(False)
+            self.reveal_attachment_button.setEnabled(False)
+            self.delete_attachment_button.setEnabled(False)
+            self.attachments_info_label.setText("当前文献尚未关联附件。点击“添加附件”按钮添加。")
 
     def _selected_attachment_payload(self) -> dict | None:
         if self._current_attachment_id is None:

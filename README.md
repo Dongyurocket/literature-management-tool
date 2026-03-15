@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
-  <img src="https://img.shields.io/badge/tests-53%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-68%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -323,12 +323,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.6.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.6.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.7.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -346,7 +346,7 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 61 tests
+python -m unittest discover -s tests -v    # 68 tests
 
 # 或使用 pytest
 python -m pytest -q
@@ -358,6 +358,19 @@ python -m compileall main.py literature_manager
 ---
 
 ## 更新日志
+
+<details open>
+<summary><b>V0.7.0</b> — 附件定位修复与交互增强</summary>
+
+- 修复附件"定位文件"功能失效：加载附件列表时增加守卫标志，防止 Qt 信号在清空/添加过程中错误重置当前选中 ID
+- 新增 `_select_attachment_item` 辅助方法，附件选中逻辑与笔记保持一致
+- 绝对路径附件也调用 `.resolve()` 统一路径解析
+- 附件列表只显示文件名，悬停显示完整路径（tooltip）
+- 无附件时显示空状态提示文字
+- 双击附件列表项直接打开文件
+- Delete 键快捷删除附件（作用域限定在附件列表）
+- 删除附件后自动选中相邻项
+</details>
 
 <details>
 <summary><b>V0.6.2</b> — 附件定位文件修复</summary>
