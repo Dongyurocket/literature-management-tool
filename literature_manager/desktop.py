@@ -22,12 +22,15 @@ def open_path(path: str, preferred_app: str = "") -> None:
 
 
 def reveal_path(path: str) -> None:
-    target = Path(path)
+    target = Path(path).expanduser()
+    if not target.exists():
+        raise FileNotFoundError(path)
+    target = target.resolve()
     if os.name == "nt":
-        if target.exists() and target.is_file():
-            subprocess.Popen(["explorer", "/select,", str(target)])
+        normalized = os.path.normpath(str(target))
+        if target.is_file():
+            subprocess.Popen(["explorer", f"/select,{normalized}"])
         else:
-            browse_target = target.parent if target.suffix else target
-            subprocess.Popen(["explorer", str(browse_target)])
+            subprocess.Popen(["explorer", normalized])
         return
     open_path(str(target.parent if target.is_file() else target))

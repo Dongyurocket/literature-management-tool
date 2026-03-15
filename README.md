@@ -360,6 +360,14 @@ python -m compileall main.py literature_manager
 ## 更新日志
 
 <details>
+<summary><b>V0.6.2</b> — 附件定位文件修复</summary>
+
+- 修复 Windows 下“附件 -> 定位文件”不能正确选中目标文件的问题
+- 统一改为使用正确的 `explorer /select,<path>` 调用格式，目录和文件的打开行为分开处理
+- 增加附件定位相关回归测试，覆盖文件定位、目录打开和缺失文件提示场景
+</details>
+
+<details>
 <summary><b>V0.6.1</b> — 详细信息保存策略与列表列配置升级</summary>
 
 - 详细信息区改为“立即保存 + 自动保存”并存，新增自动保存开关与保存间隔设置
