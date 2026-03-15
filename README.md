@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
-  <img src="https://img.shields.io/badge/tests-51%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-53%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -320,12 +320,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.5.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.5.1
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.5.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.5.1-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -343,7 +343,7 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 51 tests
+python -m unittest discover -s tests -v    # 53 tests
 
 # 或使用 pytest
 python -m pytest -q
@@ -355,6 +355,14 @@ python -m compileall main.py literature_manager
 ---
 
 ## 更新日志
+
+<details>
+<summary><b>V0.5.1</b> — 更新提示文案与时间显示优化</summary>
+
+- 检查更新走备用通道时，不再展示 HTTP 403 等技术细节，统一改为更易理解的中文提示
+- Release 发布时间改为按本机时区显示，本地查看时可直接看到形如 `2026-03-15 15:54:49` 的时间
+- 保留备用通道回退能力，受限网络下仍可继续完成版本检查
+</details>
 
 <details>
 <summary><b>V0.5.0</b> — 后台任务稳定性与发布整理</summary>

@@ -673,7 +673,7 @@ class UpdateInfoDialog(QDialog):
         text.setReadOnly(True)
         body_lines = [
             f"发布名称：{release_info.get('release_name', '')}",
-            f"发布时间：{release_info.get('published_at', '')}",
+            f"发布时间：{release_info.get('published_at_display') or release_info.get('published_at', '')}",
             f"发布页：{release_info.get('html_url', '')}",
             f"安装包：{release_info.get('asset_name', '') or '未找到'}",
         ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, tzinfo
 import json
 import os
 import re
@@ -63,17 +64,33 @@ def _select_setup_asset(assets: list[dict]) -> dict | None:
     return setup_asset
 
 
+def _format_published_at(value: str, local_tz: tzinfo | None = None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    normalized = text.replace("Z", "+00:00")
+    try:
+        published_at = datetime.fromisoformat(normalized)
+    except ValueError:
+        return text
+    if published_at.tzinfo is not None:
+        published_at = published_at.astimezone(local_tz)
+    return published_at.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _build_release_payload(repository: str, current_version: str, payload: dict, *, source: str) -> dict:
     assets = payload.get("assets", [])
     setup_asset = _select_setup_asset(assets)
     latest_version = str(payload.get("tag_name", "")).lstrip("v") or "0.0.0"
+    published_at = str(payload.get("published_at", ""))
     return {
         "repo": repository,
         "current_version": current_version,
         "latest_version": latest_version,
         "is_update_available": _normalize_version(latest_version) > _normalize_version(current_version),
         "release_name": payload.get("name", "") or f"v{latest_version}",
-        "published_at": payload.get("published_at", ""),
+        "published_at": published_at,
+        "published_at_display": _format_published_at(published_at),
         "body": payload.get("body", ""),
         "html_url": payload.get("html_url", ""),
         "asset_name": setup_asset.get("name", "") if setup_asset else "",
@@ -174,12 +191,20 @@ def _check_latest_release_via_web(repository: str, current_version: str) -> dict
     return _build_release_payload(repository, current_version, payload, source="web")
 
 
-def _fallback_release_from_web(repository: str, current_version: str, notice: str) -> dict | None:
+def _build_fallback_notice(is_update_available: bool) -> str:
+    if is_update_available:
+        return "已通过备用通道获取到最新版本信息。"
+    return "已通过备用通道检查到最新版本。"
+
+
+def _fallback_release_from_web(repository: str, current_version: str) -> dict | None:
     try:
         fallback = _check_latest_release_via_web(repository, current_version)
     except (ValueError, error.HTTPError, error.URLError):
         return None
-    fallback["update_lookup_notice"] = notice
+    fallback["update_lookup_notice"] = _build_fallback_notice(
+        bool(fallback.get("is_update_available"))
+    )
     return fallback
 
 
@@ -193,20 +218,12 @@ def check_latest_release(repo: str, current_version: str) -> dict:
         return _build_release_payload(repository, current_version, payload, source="api")
     except error.HTTPError as exc:
         if exc.code in {403, 429}:
-            fallback = _fallback_release_from_web(
-                repository,
-                current_version,
-                f"GitHub API 返回 HTTP {exc.code}，已自动回退到网页解析。",
-            )
+            fallback = _fallback_release_from_web(repository, current_version)
             if fallback is not None:
                 return fallback
         raise ValueError(f"检查更新失败：HTTP {exc.code}") from exc
     except error.URLError as exc:
-        fallback = _fallback_release_from_web(
-            repository,
-            current_version,
-            "GitHub API 请求失败，已自动回退到网页解析。",
-        )
+        fallback = _fallback_release_from_web(repository, current_version)
         if fallback is not None:
             return fallback
         raise ValueError(f"检查更新失败：{exc.reason}") from exc

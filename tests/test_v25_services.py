@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
+from datetime import timedelta, timezone
 from pathlib import Path
 from urllib import error
 from unittest import mock
@@ -20,7 +21,7 @@ from literature_manager.ocr_service import (
     read_umi_ocr_server_port,
     select_umi_ocr_asset,
 )
-from literature_manager.update_service import check_latest_release
+from literature_manager.update_service import _build_fallback_notice, _format_published_at, check_latest_release
 
 
 @contextmanager
@@ -310,6 +311,14 @@ class OcrAndUpdateTests(unittest.TestCase):
             result = check_latest_release("owner/repo", "0.3.0")
         self.assertTrue(result["is_update_available"])
         self.assertTrue(result["asset_name"].endswith("Setup.exe"))
+        self.assertRegex(result["published_at_display"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+    def test_format_published_at_converts_to_local_timezone(self):
+        display = _format_published_at(
+            "2026-03-15T07:54:49Z",
+            timezone(timedelta(hours=8)),
+        )
+        self.assertEqual(display, "2026-03-15 15:54:49")
 
     def test_check_latest_release_falls_back_to_web_when_api_403(self):
         fallback_payload = {
@@ -346,7 +355,10 @@ class OcrAndUpdateTests(unittest.TestCase):
         web_fallback_mock.assert_called_once_with("owner/repo", "0.3.1")
         self.assertEqual(result["latest_version"], "0.3.2")
         self.assertEqual(result["update_lookup_source"], "web")
-        self.assertIn("回退", result.get("update_lookup_notice", ""))
+        self.assertEqual(result["update_lookup_notice"], "已通过备用通道获取到最新版本信息。")
+
+    def test_build_fallback_notice_for_latest_version(self):
+        self.assertEqual(_build_fallback_notice(False), "已通过备用通道检查到最新版本。")
 
     def test_check_latest_release_keeps_http_error_when_web_fallback_fails(self):
         api_403 = error.HTTPError(
