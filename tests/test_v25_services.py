@@ -241,6 +241,36 @@ class MetadataProviderParsingTests(unittest.TestCase):
         self.assertIn("人工智能", payload["keywords"])
         self.assertIn("kw=", payload["metadata_search_url"])
 
+    def test_extract_partial_metadata_from_html_reads_extended_gbt_fields(self):
+        html_text = """
+        <html>
+          <head>
+            <meta name="citation_title" content="知识组织导论" />
+            <meta name="citation_subtitle" content="方法与实践" />
+            <meta name="citation_editor" content="赵钱" />
+            <meta name="citation_translator" content="李明" />
+            <meta name="citation_publisher" content="科学出版社" />
+            <meta name="citation_publication_place" content="北京" />
+            <meta name="citation_edition" content="2" />
+            <meta name="citation_publication_date" content="2024-03-15" />
+            <meta name="citation_online_date" content="2026-03-16" />
+          </head>
+        </html>
+        """
+        payload = extract_partial_metadata_from_html(
+            html_text,
+            "https://example.com/book",
+            "HTML Meta",
+        )
+        self.assertEqual(payload["subtitle"], "方法与实践")
+        self.assertEqual(payload["editors"], "赵钱")
+        self.assertEqual(payload["translators"], "李明")
+        self.assertEqual(payload["publication_place"], "北京")
+        self.assertEqual(payload["edition"], "2")
+        self.assertEqual(payload["month"], "03")
+        self.assertEqual(payload["day"], "15")
+        self.assertEqual(payload["access_date"], "2026-03-16")
+
 
 class OcrAndUpdateTests(unittest.TestCase):
     def test_metadata_service_import_tolerates_pil_without_version(self):

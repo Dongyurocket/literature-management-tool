@@ -8,6 +8,7 @@ from typing import TypeAlias
 from ..config import AppSettings
 from ..controllers import LibraryController
 from ..db import AttachmentRecord, LiteratureRecord, NoteRecord, SearchResult, StatisticsPayload
+from ..metadata_fields import metadata_field_label, metadata_fields_for_entry_type, prune_metadata_payload
 from ..utils import ENTRY_TYPE_LABELS, READING_STATUSES, ROLE_LABELS, join_csv, note_format_label
 
 FilterValue: TypeAlias = str | int
@@ -180,13 +181,17 @@ class MainWindowViewModel:
         self.controller.delete_attachment(attachment_id, delete_file=delete_file)
 
     def normalize_metadata_payload(self, payload: Mapping[str, object]) -> MetadataPayload:
-        return {
+        normalized: MetadataPayload = {
             "entry_type": self._text_value(payload.get("entry_type")) or "journal_article",
             "title": self._text_value(payload.get("title")) or "未命名文献",
+            "subtitle": self._text_value(payload.get("subtitle")),
             "translated_title": self._text_value(payload.get("translated_title")),
             "authors": self._normalize_text_list(payload.get("authors")),
+            "translators": self._text_value(payload.get("translators")),
+            "editors": self._text_value(payload.get("editors")),
             "year": self._optional_int(payload.get("year")),
             "month": self._text_value(payload.get("month")),
+            "day": self._text_value(payload.get("day")),
             "subject": self._text_value(payload.get("subject")),
             "keywords": self._text_value(payload.get("keywords")),
             "tags": self._normalize_text_list(payload.get("tags")),
@@ -194,16 +199,23 @@ class MainWindowViewModel:
             "rating": self._optional_int(payload.get("rating")),
             "publication_title": self._text_value(payload.get("publication_title")),
             "publisher": self._text_value(payload.get("publisher")),
+            "publication_place": self._text_value(payload.get("publication_place")),
             "school": self._text_value(payload.get("school")),
+            "institution": self._text_value(payload.get("institution")),
             "conference_name": self._text_value(payload.get("conference_name")),
+            "conference_place": self._text_value(payload.get("conference_place")),
+            "degree": self._text_value(payload.get("degree")),
+            "edition": self._text_value(payload.get("edition")),
             "standard_number": self._text_value(payload.get("standard_number")),
             "patent_number": self._text_value(payload.get("patent_number")),
+            "report_number": self._text_value(payload.get("report_number")),
             "volume": self._text_value(payload.get("volume")),
             "issue": self._text_value(payload.get("issue")),
             "pages": self._text_value(payload.get("pages")),
             "doi": self._text_value(payload.get("doi")),
             "isbn": self._text_value(payload.get("isbn")),
             "url": self._text_value(payload.get("url")),
+            "access_date": self._text_value(payload.get("access_date")),
             "language": self._text_value(payload.get("language")),
             "country": self._text_value(payload.get("country")),
             "summary": self._text_value(payload.get("summary")),
@@ -211,6 +223,7 @@ class MainWindowViewModel:
             "remarks": self._text_value(payload.get("remarks")),
             "cite_key": self._text_value(payload.get("cite_key")),
         }
+        return prune_metadata_payload(normalized, entry_type=normalized.get("entry_type"))
 
     def save_metadata(self, literature_id: int, payload: Mapping[str, object]) -> LiteratureRecord:
         current = self.detail_payload(literature_id)
@@ -396,31 +409,37 @@ class MainWindowViewModel:
         detail = self.detail_payload(literature_id)
         if not detail:
             return []
-        lines = [
-            f"标题：{detail.get('title') or ''}",
-            f"译题：{detail.get('translated_title') or ''}",
-            f"作者：{' / '.join(detail.get('authors', []))}",
-            f"年份：{detail.get('year') or ''}",
-            f"主题：{detail.get('subject') or ''}",
-            f"关键词：{detail.get('keywords') or ''}",
-            f"刊名/书名：{detail.get('publication_title') or ''}",
-            f"出版社/学校：{detail.get('publisher') or detail.get('school') or ''}",
-            f"DOI：{detail.get('doi') or ''}",
-            f"ISBN：{detail.get('isbn') or ''}",
-            f"语言：{detail.get('language') or ''}",
-            f"国家/地区：{detail.get('country') or ''}",
-            f"阅读状态：{detail.get('reading_status') or ''}",
-            f"标签：{join_csv(detail.get('tags', []))}",
-            "",
-            "简介：",
-            detail.get("summary") or "",
-            "",
-            "摘要：",
-            detail.get("abstract") or "",
-            "",
-            "备注：",
-            detail.get("remarks") or "",
-        ]
+        entry_type = detail.get("entry_type")
+        lines = [f"类型：{ENTRY_TYPE_LABELS.get(str(entry_type or ''), str(entry_type or ''))}"]
+        for field in metadata_fields_for_entry_type(entry_type):
+            if field in {"entry_type", "summary", "abstract", "remarks", "reading_status", "rating"}:
+                continue
+            if field == "authors":
+                value = " / ".join(detail.get("authors", []))
+            elif field == "tags":
+                value = join_csv(detail.get("tags", []))
+            else:
+                value = detail.get(field, "")
+            text = self._text_value(value)
+            if text:
+                lines.append(f"{metadata_field_label(field, entry_type)}：{text}")
+        if detail.get("reading_status"):
+            lines.append(f"阅读状态：{detail.get('reading_status')}")
+        if detail.get("rating"):
+            lines.append(f"评分：{detail.get('rating')}")
+        lines.extend(
+            [
+                "",
+                "简介：",
+                detail.get("summary") or "",
+                "",
+                "摘要：",
+                detail.get("abstract") or "",
+                "",
+                "备注：",
+                detail.get("remarks") or "",
+            ]
+        )
         return lines
 
     def attachment_lines(self, literature_id: int) -> list[str]:

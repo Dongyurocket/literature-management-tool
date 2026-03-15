@@ -19,6 +19,7 @@ from ..export_service import (
 )
 from ..import_service import import_scanned_items, scan_import_sources
 from ..maintenance_service import create_backup, find_missing_paths, repair_missing_paths, restore_backup
+from ..metadata_fields import normalize_entry_type, prune_metadata_payload
 from ..metadata_service import lookup_doi, lookup_isbn, lookup_title_metadata
 from ..ocr_service import install_umi_ocr
 from ..update_service import check_latest_release, download_release_asset
@@ -353,10 +354,17 @@ class LibraryController:
 
     def merge_metadata_payload(self, current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
         payload = dict(current)
+        current_entry_type = normalize_entry_type(payload.get("entry_type"))
         for key, value in incoming.items():
             if key in {"id", "attachments", "notes"}:
                 continue
             if key == "source_provider" or str(key).startswith("metadata_"):
+                continue
+            if key == "entry_type":
+                incoming_entry_type = normalize_entry_type(value)
+                if current_entry_type == "misc" and incoming_entry_type != "misc":
+                    payload["entry_type"] = incoming_entry_type
+                    current_entry_type = incoming_entry_type
                 continue
             if key == "authors":
                 incoming_authors = [str(item).strip() for item in (value or []) if str(item).strip()]
@@ -389,7 +397,7 @@ class LibraryController:
             elif not self._is_effectively_empty(key, value):
                 if self._is_effectively_empty(key, payload.get(key)):
                     payload[key] = value
-        return payload
+        return prune_metadata_payload(payload, entry_type=payload.get("entry_type"))
 
     def apply_metadata_payload(self, literature_id: int, incoming: dict[str, Any]) -> dict[str, Any] | None:
         current = self.get_literature(literature_id)

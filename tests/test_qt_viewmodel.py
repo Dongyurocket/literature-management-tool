@@ -122,6 +122,28 @@ class MainWindowViewModelTests(unittest.TestCase):
                 self.assertTrue(all(isinstance(line, str) for line in lines))
                 self.assertTrue(any(line.startswith("标题：") for line in lines))
 
+    def test_normalize_metadata_payload_prunes_fields_by_entry_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                viewmodel = MainWindowViewModel(controller)
+                payload = viewmodel.normalize_metadata_payload(
+                    {
+                        "entry_type": "book",
+                        "title": "Book Item",
+                        "authors": ["Alice"],
+                        "publisher": "Science Press",
+                        "publication_place": "Beijing",
+                        "edition": "2",
+                        "volume": "99",
+                    }
+                )
+
+                self.assertEqual(payload["entry_type"], "book")
+                self.assertEqual(payload["publisher"], "Science Press")
+                self.assertEqual(payload["publication_place"], "Beijing")
+                self.assertEqual(payload["edition"], "2")
+                self.assertEqual(payload["volume"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

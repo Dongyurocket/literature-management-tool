@@ -240,6 +240,38 @@ class QtMainWindowMetadataTests(unittest.TestCase):
 
                 self.assertFalse(save_metadata.called)
 
+    def test_entry_type_switch_updates_visible_fields_and_clears_hidden_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_window(Path(tmp)) as window:
+                literature_id = window.viewmodel.controller.save_literature(
+                    {
+                        "entry_type": "book",
+                        "title": "字段裁剪测试",
+                        "authors": ["张三"],
+                        "publisher": "科学出版社",
+                        "publication_place": "北京",
+                        "edition": "2",
+                        "tags": [],
+                    }
+                )
+                window._refresh_after_library_change(preserve_id=literature_id, navigation_key="all")
+                window._show_detail(literature_id)
+
+                self.assertFalse(window.publisher_edit.isHidden())
+                self.assertTrue(window.volume_edit.isHidden())
+
+                window.entry_type_combo.setCurrentIndex(window.entry_type_combo.findData("journal_article"))
+                APP.processEvents()
+                window._save_metadata_changes()
+
+                self.assertTrue(window.publisher_edit.isHidden())
+                self.assertFalse(window.volume_edit.isHidden())
+                detail = window.viewmodel.controller.get_literature(literature_id)
+                self.assertEqual(detail.get("entry_type"), "journal_article")
+                self.assertEqual(detail.get("publisher"), "")
+                self.assertEqual(detail.get("publication_place"), "")
+                self.assertEqual(detail.get("edition"), "")
+
 
 class SettingsDialogMetadataSourceTests(unittest.TestCase):
     def test_metadata_source_supports_multi_select_and_preserves_order(self):

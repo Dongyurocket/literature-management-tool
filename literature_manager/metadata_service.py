@@ -20,6 +20,7 @@ from pypdf import PdfReader
 
 from . import __version__
 from .config import AppSettings
+from .metadata_fields import prune_metadata_payload
 from .ocr_service import extract_pdf_text_with_ocr
 from .utils import detect_note_format, extract_year, normalize_for_compare, sanitize_filename
 
@@ -186,6 +187,120 @@ def _normalize_author_list(values: list[str] | tuple[str, ...] | None) -> list[s
     return authors
 
 
+def _normalize_person_names(value) -> list[str]:
+    if isinstance(value, list):
+        names: list[str] = []
+        for item in value:
+            names.extend(_normalize_person_names(item))
+        return _normalize_author_list(names)
+    if isinstance(value, tuple):
+        names: list[str] = []
+        for item in value:
+            names.extend(_normalize_person_names(item))
+        return _normalize_author_list(names)
+    if isinstance(value, dict):
+        if value.get("name"):
+            return _normalize_author_list([str(value["name"])])
+        given = str(value.get("given") or value.get("givenName") or "").strip()
+        family = str(value.get("family") or value.get("familyName") or "").strip()
+        full_name = " ".join(part for part in [given, family] if part).strip()
+        return _normalize_author_list([full_name]) if full_name else []
+    if isinstance(value, str):
+        return _normalize_author_list([value])
+    return []
+
+
+def _join_person_names(value) -> str:
+    return ", ".join(_normalize_person_names(value))
+
+
+def _first_text(value, *keys: str) -> str:
+    if isinstance(value, dict):
+        for key in keys:
+            candidate = value.get(key)
+            if isinstance(candidate, (dict, list, tuple)):
+                text = _first_text(candidate, *keys)
+            else:
+                text = _clean_html_text(str(candidate or ""))
+            if text:
+                return text
+        return ""
+    if isinstance(value, list):
+        for item in value:
+            text = _first_text(item, *keys)
+            if text:
+                return text
+        return ""
+    return _clean_html_text(str(value or ""))
+
+
+def _flatten_text_values(value, *keys: str) -> list[str]:
+    values: list[str] = []
+    if isinstance(value, list):
+        for item in value:
+            values.extend(_flatten_text_values(item, *keys))
+    elif isinstance(value, tuple):
+        for item in value:
+            values.extend(_flatten_text_values(item, *keys))
+    elif isinstance(value, dict):
+        text = _first_text(value, *keys)
+        if text:
+            values.append(text)
+    else:
+        text = _clean_html_text(str(value or ""))
+        if text:
+            values.append(text)
+    return values
+
+
+def _clean_date_component(value) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.isdigit():
+        return text.zfill(2)
+    match = re.search(r"\d{1,2}", text)
+    return match.group(0).zfill(2) if match else text
+
+
+def _date_parts_from_value(value) -> tuple[int | None, str, str]:
+    if isinstance(value, dict):
+        if "date-parts" in value:
+            return _date_parts_from_value(value.get("date-parts"))
+        if "date" in value:
+            return _date_parts_from_value(value.get("date"))
+        return (None, "", "")
+    if isinstance(value, (list, tuple)):
+        if value and isinstance(value[0], dict):
+            for item in value:
+                parsed = _date_parts_from_value(item)
+                if parsed != (None, "", ""):
+                    return parsed
+            return (None, "", "")
+        if value and isinstance(value[0], (list, tuple)):
+            return _date_parts_from_value(value[0])
+        parts = list(value)
+        if not parts:
+            return (None, "", "")
+        year = int(parts[0]) if str(parts[0]).isdigit() else extract_year(str(parts[0]))
+        month = _clean_date_component(parts[1]) if len(parts) > 1 else ""
+        day = _clean_date_component(parts[2]) if len(parts) > 2 else ""
+        return (year, month, day)
+    text = str(value or "").strip()
+    if not text:
+        return (None, "", "")
+    match = re.search(
+        r"(?P<year>(?:19|20)\d{2})(?:[^\d]+(?P<month>\d{1,2}))?(?:[^\d]+(?P<day>\d{1,2}))?",
+        text,
+    )
+    if not match:
+        return (extract_year(text), "", "")
+    year = int(match.group("year"))
+    month = _clean_date_component(match.group("month") or "")
+    day = _clean_date_component(match.group("day") or "")
+    return (year, month, day)
+
+
 def _join_pages(first_page: str, last_page: str) -> str:
     first = (first_page or "").strip()
     last = (last_page or "").strip()
@@ -239,26 +354,29 @@ def _map_work_hint(item_type: str) -> str:
         "journalarticle": "journal_article",
         "article": "journal_article",
         "scholarlyarticle": "journal_article",
+        "newsarticle": "journal_article",
         "book": "book",
         "bookchapter": "book",
         "thesis": "thesis",
         "dissertation": "thesis",
         "conferencepaper": "conference_paper",
         "conferenceproceedings": "conference_paper",
+        "reportage": "report",
         "report": "report",
+        "patent": "patent",
+        "standard": "standard",
+        "webpage": "webpage",
+        "website": "webpage",
     }
     return mapping.get(normalized, "")
 
 
 def _authors_from_crossref(message: dict) -> list[str]:
-    authors: list[str] = []
-    for author in message.get("author", []):
-        given = (author.get("given") or "").strip()
-        family = (author.get("family") or "").strip()
-        full = " ".join(part for part in (given, family) if part).strip()
-        if full:
-            authors.append(full)
-    return authors
+    return _normalize_person_names(message.get("author", []))
+
+
+def _contributors_from_crossref(message: dict, role: str) -> str:
+    return _join_person_names(message.get(role, []))
 
 
 def _authors_from_openalex(item: dict) -> list[str]:
@@ -272,44 +390,46 @@ def _authors_from_openalex(item: dict) -> list[str]:
 
 
 def _authors_from_datacite(payload: dict) -> list[str]:
-    authors: list[str] = []
-    for creator in payload.get("creators", []):
-        name = (creator.get("name") or "").strip()
-        if name:
-            authors.append(name)
-    return authors
+    return _normalize_person_names(payload.get("creators", []))
+
+
+def _contributors_from_datacite(payload: dict, contributor_type: str) -> str:
+    contributors = [
+        item
+        for item in payload.get("contributors", [])
+        if str(item.get("contributorType", "")).lower() == contributor_type.lower()
+    ]
+    return _join_person_names(contributors)
 
 
 def _map_crossref_type(item_type: str) -> str:
     mapping = {
         "journal-article": "journal_article",
+        "article": "journal_article",
         "book": "book",
         "book-chapter": "book",
         "proceedings-article": "conference_paper",
+        "proceedings": "conference_paper",
         "dissertation": "thesis",
         "report": "report",
         "standard": "standard",
-        "posted-content": "report",
+        "journal": "journal_article",
+        "posted-content": "webpage",
+        "report-series": "report",
+        "book-series": "book",
+        "book-part": "book",
+        "component": "webpage",
+        "peer-review": "report",
+        "standard-series": "standard",
+        "grant": "report",
+        "reference-entry": "misc",
+        "patent": "patent",
     }
     return mapping.get(item_type, "misc")
 
 
 def _authors_from_json_ld(value) -> list[str]:
-    if isinstance(value, list):
-        authors: list[str] = []
-        for item in value:
-            authors.extend(_authors_from_json_ld(item))
-        return _normalize_author_list(authors)
-    if isinstance(value, dict):
-        if value.get("name"):
-            return _normalize_author_list([str(value["name"])])
-        given = str(value.get("givenName", "")).strip()
-        family = str(value.get("familyName", "")).strip()
-        full_name = " ".join(part for part in [given, family] if part).strip()
-        return _normalize_author_list([full_name]) if full_name else []
-    if isinstance(value, str):
-        return _normalize_author_list([value])
-    return []
+    return _normalize_person_names(value)
 
 
 def _flatten_json_ld_objects(value) -> list[dict]:
@@ -336,6 +456,17 @@ def _payload_from_meta_tags(meta_tags: dict[str, list[str]], fallback_url: str, 
             "author",
         )
     )
+    published_at = _first_non_empty(
+        _meta_values(
+            meta_tags,
+            "citation_publication_date",
+            "citation_date",
+            "dc.date",
+            "dcterms.issued",
+            "prism.publicationdate",
+        )
+    )
+    year, month, day = _date_parts_from_value(published_at)
     publication_title = _first_non_empty(
         _meta_values(
             meta_tags,
@@ -396,21 +527,34 @@ def _payload_from_meta_tags(meta_tags: dict[str, list[str]], fallback_url: str, 
                 "title",
             )
         ),
+        "subtitle": _first_non_empty(_meta_values(meta_tags, "citation_subtitle", "subtitle")),
+        "translated_title": _first_non_empty(
+            _meta_values(meta_tags, "citation_translated_title", "dc.title.alternative", "dcterms.alternative")
+        ),
         "publication_title": publication_title,
         "publisher": _first_non_empty(_meta_values(meta_tags, "citation_publisher", "dc.publisher")),
-        "conference_name": _first_non_empty(_meta_values(meta_tags, "citation_conference_title")),
-        "year": extract_year(
-            _first_non_empty(
-                _meta_values(
-                    meta_tags,
-                    "citation_publication_date",
-                    "citation_date",
-                    "dc.date",
-                    "dcterms.issued",
-                    "prism.publicationdate",
-                )
+        "publication_place": _first_non_empty(
+            _meta_values(meta_tags, "citation_publication_place", "citation_place", "dc.coverage")
+        ),
+        "school": _first_non_empty(_meta_values(meta_tags, "citation_dissertation_institution", "citation_school")),
+        "institution": _first_non_empty(
+            _meta_values(
+                meta_tags,
+                "citation_technical_report_institution",
+                "citation_institution",
+                "citation_patent_assignee",
             )
         ),
+        "conference_name": _first_non_empty(_meta_values(meta_tags, "citation_conference_title")),
+        "conference_place": _first_non_empty(_meta_values(meta_tags, "citation_conference_location")),
+        "degree": _first_non_empty(_meta_values(meta_tags, "citation_dissertation_name")),
+        "edition": _first_non_empty(_meta_values(meta_tags, "citation_edition")),
+        "standard_number": _first_non_empty(_meta_values(meta_tags, "citation_standard_number")),
+        "patent_number": _first_non_empty(_meta_values(meta_tags, "citation_patent_number")),
+        "report_number": _first_non_empty(_meta_values(meta_tags, "citation_technical_report_number")),
+        "year": year,
+        "month": month,
+        "day": day,
         "volume": _first_non_empty(_meta_values(meta_tags, "citation_volume", "prism.volume")),
         "issue": _first_non_empty(_meta_values(meta_tags, "citation_issue", "prism.number")),
         "pages": _join_pages(
@@ -421,11 +565,15 @@ def _payload_from_meta_tags(meta_tags: dict[str, list[str]], fallback_url: str, 
         "doi": doi,
         "isbn": _normalize_isbn_value(_first_non_empty(_meta_values(meta_tags, "citation_isbn", "isbn"))),
         "url": url,
+        "access_date": _first_non_empty(_meta_values(meta_tags, "citation_online_date")),
         "language": _first_non_empty(_meta_values(meta_tags, "citation_language", "dc.language")),
+        "country": _first_non_empty(_meta_values(meta_tags, "citation_patent_country")),
         "keywords": _split_keywords(_meta_values(meta_tags, "citation_keywords", "keywords", "dc.subject")),
         "abstract": abstract,
         "summary": abstract[:240],
         "authors": authors,
+        "translators": _join_person_names(_meta_values(meta_tags, "citation_translator")),
+        "editors": _join_person_names(_meta_values(meta_tags, "citation_editor")),
         "source_provider": source_provider,
     }
 
@@ -446,13 +594,31 @@ def _payload_from_json_ld(document: str, fallback_url: str, source_provider: str
         except json.JSONDecodeError:
             continue
         for obj in _flatten_json_ld_objects(data):
-            type_hint = str(obj.get("@type", "")).replace(" ", "")
+            raw_type = obj.get("@type", "")
+            if isinstance(raw_type, list):
+                type_hint = next((str(item).replace(" ", "") for item in raw_type if item), "")
+            else:
+                type_hint = str(raw_type).replace(" ", "")
+            published_at = str(obj.get("datePublished") or obj.get("dateCreated") or "")
+            year, month, day = _date_parts_from_value(published_at)
+            event = obj.get("event")
+            if not isinstance(event, dict):
+                event = obj.get("superEvent")
             payload = {
                 "entry_type": _map_work_hint(type_hint),
                 "title": _clean_html_text(str(obj.get("name") or obj.get("headline") or "")),
+                "subtitle": _clean_html_text(str(obj.get("alternativeHeadline") or obj.get("alternateName") or "")),
+                "translated_title": "",
                 "publication_title": "",
                 "publisher": "",
-                "year": extract_year(str(obj.get("datePublished") or obj.get("dateCreated") or "")),
+                "publication_place": "",
+                "institution": "",
+                "conference_name": _first_text(event, "name"),
+                "conference_place": _first_text(event, "location"),
+                "edition": _clean_html_text(str(obj.get("bookEdition") or obj.get("version") or "")),
+                "year": year,
+                "month": month,
+                "day": day,
                 "doi": "",
                 "isbn": "",
                 "url": str(obj.get("url") or obj.get("@id") or fallback_url),
@@ -461,6 +627,8 @@ def _payload_from_json_ld(document: str, fallback_url: str, source_provider: str
                 "abstract": _clean_html_text(str(obj.get("description") or obj.get("abstract") or "")),
                 "summary": "",
                 "authors": _authors_from_json_ld(obj.get("author")),
+                "translators": _join_person_names(obj.get("translator")),
+                "editors": _join_person_names(obj.get("editor")),
                 "source_provider": source_provider,
             }
             if isinstance(obj.get("identifier"), list):
@@ -480,14 +648,37 @@ def _payload_from_json_ld(document: str, fallback_url: str, source_provider: str
                 payload["doi"] = doi_match
             if isinstance(obj.get("isPartOf"), dict):
                 payload["publication_title"] = _clean_html_text(str(obj["isPartOf"].get("name") or ""))
+            elif isinstance(obj.get("mainEntityOfPage"), dict):
+                payload["publication_title"] = _clean_html_text(str(obj["mainEntityOfPage"].get("name") or ""))
             publisher = obj.get("publisher")
             if isinstance(publisher, dict):
                 payload["publisher"] = _clean_html_text(str(publisher.get("name") or ""))
+                payload["publication_place"] = _first_text(
+                    publisher.get("location") or publisher.get("address") or {},
+                    "name",
+                    "addressLocality",
+                    "addressRegion",
+                    "addressCountry",
+                )
+            elif isinstance(publisher, list):
+                payload["publisher"] = _first_text(publisher, "name")
+            if not payload["institution"]:
+                payload["institution"] = _first_text(obj.get("sourceOrganization"), "name")
             keywords = obj.get("keywords")
             if isinstance(keywords, list):
                 payload["keywords"] = _split_keywords([str(item) for item in keywords])
             elif isinstance(keywords, str):
                 payload["keywords"] = _split_keywords([keywords])
+            if not payload["publication_place"]:
+                payload["publication_place"] = _first_text(
+                    obj.get("locationCreated") or obj.get("contentLocation"),
+                    "name",
+                    "addressLocality",
+                    "addressRegion",
+                    "addressCountry",
+                )
+            if payload["entry_type"] == "webpage":
+                payload["institution"] = payload["institution"] or payload["publisher"]
             if payload["abstract"]:
                 payload["summary"] = payload["abstract"][:240]
             best = _merge_partial_payload(best, payload)
@@ -518,23 +709,39 @@ def _payload_from_sfx_context(document: str, fallback_url: str, source_provider:
     doi = _normalize_doi_value(_sfx_scalar(context, "rft.doi"))
     isbn = _normalize_isbn_value(_sfx_scalar(context, "rft.isbn"))
     abstract = _sfx_scalar(context, "rft.description")
+    year, month, day = _date_parts_from_value(_sfx_scalar(context, "rft.date") or _sfx_scalar(context, "rft.year"))
     return {
         "entry_type": _map_work_hint(genre),
         "title": title,
+        "subtitle": _sfx_scalar(context, "rft.subtitle"),
         "publication_title": publication_title,
         "publisher": _sfx_scalar(context, "rft.pub"),
+        "publication_place": _sfx_scalar(context, "rft.place"),
+        "school": _sfx_scalar(context, "rft.inst"),
+        "institution": _sfx_scalar(context, "rft.inst"),
         "conference_name": _sfx_scalar(context, "rft.conf_name"),
-        "year": extract_year(_sfx_scalar(context, "rft.date") or _sfx_scalar(context, "rft.year")),
+        "conference_place": _sfx_scalar(context, "rft.conf_place"),
+        "degree": _sfx_scalar(context, "rft.degree"),
+        "edition": _sfx_scalar(context, "rft.edition"),
+        "standard_number": _sfx_scalar(context, "rft.stdnum"),
+        "patent_number": _sfx_scalar(context, "rft.number"),
+        "report_number": _sfx_scalar(context, "rft.number"),
+        "year": year,
+        "month": month,
+        "day": day,
         "volume": _sfx_scalar(context, "rft.volume"),
         "issue": _sfx_scalar(context, "rft.issue"),
         "pages": pages,
         "doi": doi,
         "isbn": isbn,
         "url": fallback_url,
+        "access_date": _sfx_scalar(context, "rft.accessdate"),
         "keywords": _sfx_scalar(context, "rft.subject"),
         "abstract": abstract,
         "summary": abstract[:240],
         "authors": _sfx_list(context, "@rft.au"),
+        "translators": _join_person_names(_sfx_list(context, "@rft.trans")),
+        "editors": _join_person_names(_sfx_list(context, "@rft.ed")),
         "source_provider": source_provider,
     }
 
@@ -706,31 +913,56 @@ def _extract_cnki_search_candidates(document: str, search_url: str) -> list[dict
     return candidates
 
 def _payload_from_crossref(message: dict) -> dict:
-    issued = message.get("issued", {}).get("date-parts", [[]])
-    year = issued[0][0] if issued and issued[0] else None
+    year, month, day = _date_parts_from_value(
+        message.get("published-print")
+        or message.get("published-online")
+        or message.get("issued")
+        or message.get("created")
+    )
     title = " ".join(message.get("title", [])).strip()
     subtitle = " ".join(message.get("subtitle", [])).strip()
     abstract = re.sub(r"<[^>]+>", " ", message.get("abstract", "") or "").strip()
     keywords = ", ".join(message.get("subject", []))
     container_title = " ".join(message.get("container-title", [])).strip()
+    event = message.get("event") if isinstance(message.get("event"), dict) else {}
+    institution = ""
+    if isinstance(message.get("institution"), list):
+        institution = ", ".join(_flatten_text_values(message["institution"], "name", "place"))
+    elif isinstance(message.get("institution"), dict):
+        institution = _first_text(message.get("institution"), "name", "place")
     return {
         "entry_type": _map_crossref_type(message.get("type", "")),
         "title": title,
-        "translated_title": subtitle,
+        "subtitle": subtitle,
+        "translated_title": "",
         "publication_title": container_title,
         "publisher": message.get("publisher", ""),
+        "publication_place": message.get("publisher-location", ""),
+        "school": message.get("publisher", "") if message.get("type") == "dissertation" else "",
+        "institution": institution,
         "conference_name": container_title if message.get("type") == "proceedings-article" else "",
+        "conference_place": _first_text(event.get("location"), "name", "addressLocality", "addressRegion", "addressCountry"),
+        "degree": _first_text(message.get("degree"), "label", "name") or str(message.get("degree") or ""),
+        "edition": str(message.get("edition-number") or ""),
+        "standard_number": str(message.get("number") or "") if message.get("type") == "standard" else "",
+        "patent_number": str(message.get("number") or "") if message.get("type") == "patent" else "",
+        "report_number": str(message.get("number") or "") if message.get("type") in {"report", "report-series"} else "",
         "year": year,
+        "month": month,
+        "day": day,
         "volume": message.get("volume", ""),
         "issue": message.get("issue", ""),
         "pages": message.get("page", ""),
         "doi": message.get("DOI", ""),
+        "isbn": _normalize_isbn_value(_first_non_empty([item for item in message.get("ISBN", []) if item])),
         "url": message.get("URL", ""),
         "language": message.get("language", ""),
         "keywords": keywords,
         "abstract": abstract,
         "summary": abstract[:240],
         "authors": _authors_from_crossref(message),
+        "translators": _contributors_from_crossref(message, "translator"),
+        "editors": _contributors_from_crossref(message, "editor"),
         "tags": [],
         "source_provider": "Crossref",
     }
@@ -738,7 +970,22 @@ def _payload_from_crossref(message: dict) -> dict:
 
 def _payload_from_datacite(attributes: dict) -> dict:
     titles = attributes.get("titles", [])
-    title = titles[0].get("title", "") if titles else ""
+    title = ""
+    subtitle = ""
+    translated_title = ""
+    for item in titles:
+        if not isinstance(item, dict):
+            continue
+        title_type = str(item.get("titleType", "")).lower()
+        text = str(item.get("title") or "")
+        if not title and title_type not in {"subtitle", "translatedtitle"}:
+            title = text
+        if title_type == "subtitle" and not subtitle:
+            subtitle = text
+        if title_type == "translatedtitle" and not translated_title:
+            translated_title = text
+    if not title and titles:
+        title = str(titles[0].get("title", ""))
     descriptions = attributes.get("descriptions", [])
     abstract = ""
     for item in descriptions:
@@ -752,13 +999,27 @@ def _payload_from_datacite(attributes: dict) -> dict:
             subjects.append(str(item["subject"]))
         elif isinstance(item, str):
             subjects.append(item)
+    year, month, day = _date_parts_from_value(attributes.get("dates") or attributes.get("publicationYear"))
+    if year is None:
+        year = extract_year(str(attributes.get("publicationYear", "")))
+    creators = attributes.get("creators", [])
+    institution = ""
+    if creators:
+        institution = ", ".join(
+            _flatten_text_values(creators[0].get("affiliation"), "name") if isinstance(creators[0], dict) else []
+        )
     return {
         "entry_type": _map_crossref_type(str(attributes.get("types", {}).get("resourceTypeGeneral", "")).lower()),
         "title": title,
-        "translated_title": "",
+        "subtitle": subtitle,
+        "translated_title": translated_title,
         "publication_title": attributes.get("container", {}).get("title", ""),
         "publisher": attributes.get("publisher", ""),
-        "year": extract_year(str(attributes.get("publicationYear", ""))),
+        "publication_place": _first_text(attributes.get("geoLocations"), "geoLocationPlace"),
+        "institution": institution,
+        "year": year,
+        "month": month,
+        "day": day,
         "doi": attributes.get("doi", ""),
         "url": attributes.get("url", ""),
         "language": attributes.get("language", ""),
@@ -766,6 +1027,8 @@ def _payload_from_datacite(attributes: dict) -> dict:
         "abstract": abstract,
         "summary": abstract[:240],
         "authors": _authors_from_datacite(attributes),
+        "translators": _contributors_from_datacite(attributes, "Translator"),
+        "editors": _contributors_from_datacite(attributes, "Editor"),
         "tags": [],
         "source_provider": "DataCite",
     }
@@ -783,21 +1046,26 @@ def _payload_from_openalex(item: dict) -> dict:
                 pairs.append((int(position), word))
         pairs.sort(key=lambda pair: pair[0])
         abstract = " ".join(word for _position, word in pairs)
+    biblio = item.get("biblio", {})
+    year, month, day = _date_parts_from_value(item.get("publication_date") or item.get("from_publication_date"))
     return {
         "entry_type": _map_crossref_type(item.get("type", "")),
         "title": title,
+        "subtitle": "",
         "translated_title": "",
         "publication_title": source.get("display_name", ""),
         "publisher": source.get("host_organization_name", ""),
         "conference_name": source.get("display_name", "") if item.get("type") == "proceedings-article" else "",
-        "year": item.get("publication_year"),
-        "volume": item.get("biblio", {}).get("volume", ""),
-        "issue": item.get("biblio", {}).get("issue", ""),
+        "year": year or item.get("publication_year"),
+        "month": month,
+        "day": day,
+        "volume": biblio.get("volume", ""),
+        "issue": biblio.get("issue", ""),
         "pages": "-".join(
             part
             for part in [
-                item.get("biblio", {}).get("first_page", ""),
-                item.get("biblio", {}).get("last_page", ""),
+                biblio.get("first_page", ""),
+                biblio.get("last_page", ""),
             ]
             if part
         ),
@@ -825,17 +1093,25 @@ def _payload_from_openlibrary(book: dict, normalized: str) -> dict:
     authors = [item.get("name", "") for item in book.get("authors", []) if item.get("name")]
     notes = book.get("notes")
     summary = notes if isinstance(notes, str) else ""
+    year, month, day = _date_parts_from_value(publish_date)
     return {
         "entry_type": "book",
         "title": title,
-        "translated_title": subtitle,
+        "subtitle": subtitle,
+        "translated_title": "",
         "publisher": publishers,
-        "year": extract_year(publish_date),
+        "publication_place": ", ".join(_flatten_text_values(book.get("publish_places"), "name")),
+        "edition": str(book.get("edition_name") or ""),
+        "year": year,
+        "month": month,
+        "day": day,
         "isbn": normalized,
         "url": book.get("url", ""),
         "authors": authors,
+        "pages": str(book.get("number_of_pages") or ""),
         "tags": [],
         "summary": summary[:240],
+        "abstract": summary,
         "source_provider": "OpenLibrary",
     }
 
@@ -849,16 +1125,23 @@ def _payload_from_google_books(item: dict, normalized: str) -> dict:
             isbn = identifier.get("identifier", normalized)
             break
     description = info.get("description", "")
+    year, month, day = _date_parts_from_value(info.get("publishedDate", ""))
     return {
         "entry_type": "book",
         "title": info.get("title", ""),
-        "translated_title": info.get("subtitle", ""),
+        "subtitle": info.get("subtitle", ""),
+        "translated_title": "",
         "publisher": info.get("publisher", ""),
-        "year": extract_year(info.get("publishedDate", "")),
+        "publication_place": "",
+        "year": year,
+        "month": month,
+        "day": day,
         "isbn": isbn,
         "url": info.get("infoLink", ""),
         "authors": info.get("authors", []),
         "language": info.get("language", ""),
+        "keywords": _split_keywords(info.get("categories", [])),
+        "pages": str(info.get("pageCount") or ""),
         "tags": [],
         "summary": description[:240],
         "abstract": description,
@@ -1206,42 +1489,67 @@ def parse_bib_text(content: str) -> list[dict]:
         entry_type, cite_key = header_match.groups()
         body = part[header_match.end() :].rstrip().rstrip("}")
         fields = _parse_bib_fields(body)
-        authors = [item.strip() for item in re.split(r"\s+and\s+", fields.get("author", "")) if item.strip()]
+        normalized_entry_type = {
+            "article": "journal_article",
+            "book": "book",
+            "booklet": "book",
+            "thesis": "thesis",
+            "phdthesis": "thesis",
+            "mastersthesis": "thesis",
+            "inproceedings": "conference_paper",
+            "proceedings": "conference_paper",
+            "report": "report",
+            "techreport": "report",
+            "patent": "patent",
+            "standard": "standard",
+            "online": "webpage",
+            "webpage": "webpage",
+            "misc": "misc",
+        }.get(entry_type.lower(), "misc")
+        authors = _normalize_author_list([fields.get("author", "")])
+        year, month, day = _date_parts_from_value(fields.get("date") or fields.get("year"))
         publication_title = fields.get("journal") or fields.get("booktitle", "")
-        entries.append(
-            {
-                "entry_type": {
-                    "article": "journal_article",
-                    "book": "book",
-                    "thesis": "thesis",
-                    "inproceedings": "conference_paper",
-                    "report": "report",
-                    "misc": "misc",
-                }.get(entry_type.lower(), "misc"),
-                "cite_key": cite_key,
-                "title": fields.get("title", ""),
-                "translated_title": fields.get("titleaddon", ""),
-                "publication_title": publication_title,
-                "publisher": fields.get("publisher", ""),
-                "school": fields.get("school", ""),
-                "conference_name": fields.get("eventtitle", ""),
-                "year": extract_year(fields.get("year", "")),
-                "volume": fields.get("volume", ""),
-                "issue": fields.get("number", ""),
-                "pages": fields.get("pages", ""),
-                "doi": fields.get("doi", ""),
-                "isbn": fields.get("isbn", ""),
-                "url": fields.get("url", ""),
-                "language": fields.get("langid", ""),
-                "subject": fields.get("usera", ""),
-                "keywords": fields.get("keywords", ""),
-                "summary": fields.get("annotation", ""),
-                "abstract": fields.get("abstract", ""),
-                "authors": authors,
-                "tags": [],
-                "source_provider": "BibTeX",
-            }
-        )
+        payload = {
+            "entry_type": normalized_entry_type,
+            "cite_key": cite_key,
+            "title": fields.get("title", ""),
+            "subtitle": fields.get("subtitle", ""),
+            "translated_title": fields.get("titleaddon", "") or fields.get("origtitle", ""),
+            "publication_title": publication_title,
+            "publisher": fields.get("publisher", ""),
+            "publication_place": fields.get("location", "") or fields.get("address", ""),
+            "school": fields.get("school", ""),
+            "institution": fields.get("institution", "") or fields.get("organization", ""),
+            "conference_name": fields.get("eventtitle", ""),
+            "conference_place": fields.get("venue", ""),
+            "degree": fields.get("type", "") if normalized_entry_type == "thesis" else "",
+            "edition": fields.get("edition", ""),
+            "standard_number": fields.get("number", "") if normalized_entry_type == "standard" else "",
+            "patent_number": fields.get("number", "") if normalized_entry_type == "patent" else "",
+            "report_number": fields.get("number", "") if normalized_entry_type == "report" else "",
+            "year": year,
+            "month": fields.get("month", "") or month,
+            "day": fields.get("day", "") or day,
+            "volume": fields.get("volume", ""),
+            "issue": fields.get("number", "") if normalized_entry_type == "journal_article" else fields.get("issue", ""),
+            "pages": fields.get("pages", ""),
+            "doi": fields.get("doi", ""),
+            "isbn": fields.get("isbn", ""),
+            "url": fields.get("url", ""),
+            "access_date": fields.get("urldate", ""),
+            "language": fields.get("langid", ""),
+            "subject": fields.get("usera", ""),
+            "keywords": fields.get("keywords", ""),
+            "summary": fields.get("annotation", ""),
+            "abstract": fields.get("abstract", ""),
+            "remarks": fields.get("note", ""),
+            "authors": authors,
+            "translators": ", ".join(_normalize_author_list([fields.get("translator", "")])),
+            "editors": ", ".join(_normalize_author_list([fields.get("editor", "")])),
+            "tags": [],
+            "source_provider": "BibTeX",
+        }
+        entries.append(prune_metadata_payload(payload, entry_type=payload.get("entry_type")))
     return entries
 
 
@@ -1255,54 +1563,99 @@ def parse_ris_text(content: str) -> list[dict]:
             continue
         key, value = match.groups()
         if key == "TY":
-            current = {"type": value, "authors": [], "keywords": []}
+            current = {"type": value, "authors": [], "editors": [], "translators": [], "keywords": []}
         elif key == "ER":
-            entries.append(
-                {
-                    "entry_type": {
-                        "JOUR": "journal_article",
-                        "BOOK": "book",
-                        "THES": "thesis",
-                        "CONF": "conference_paper",
-                        "RPRT": "report",
-                    }.get(str(current.get("type", "")).upper(), "misc"),
-                    "title": str(current.get("title", "")),
-                    "translated_title": "",
-                    "publication_title": str(current.get("publication_title", "")),
-                    "publisher": str(current.get("publisher", "")),
-                    "school": str(current.get("school", "")),
-                    "conference_name": str(current.get("conference_name", "")),
-                    "year": extract_year(str(current.get("year", ""))),
-                    "volume": str(current.get("volume", "")),
-                    "issue": str(current.get("issue", "")),
-                    "pages": str(current.get("pages", "")),
-                    "doi": str(current.get("doi", "")),
-                    "isbn": str(current.get("isbn", "")),
-                    "url": str(current.get("url", "")),
-                    "language": str(current.get("language", "")),
-                    "keywords": ", ".join(current.get("keywords", [])),
-                    "summary": str(current.get("summary", "")),
-                    "abstract": str(current.get("abstract", "")),
-                    "authors": list(current.get("authors", [])),
-                    "tags": [],
-                    "source_provider": "RIS",
-                }
-            )
+            normalized_entry_type = {
+                "JOUR": "journal_article",
+                "BOOK": "book",
+                "THES": "thesis",
+                "CONF": "conference_paper",
+                "CPAPER": "conference_paper",
+                "RPRT": "report",
+                "STAND": "standard",
+                "PAT": "patent",
+                "ELEC": "webpage",
+                "WEB": "webpage",
+            }.get(str(current.get("type", "")).upper(), "misc")
+            year, month, day = _date_parts_from_value(str(current.get("date", "") or current.get("year", "")))
+            school = str(current.get("school", ""))
+            if not school and normalized_entry_type == "thesis":
+                school = str(current.get("publisher", ""))
+            institution = str(current.get("institution", ""))
+            if not institution and normalized_entry_type in {"report", "patent"}:
+                institution = str(current.get("publisher", ""))
+            payload = {
+                "entry_type": normalized_entry_type,
+                "title": str(current.get("title", "")),
+                "subtitle": str(current.get("subtitle", "")),
+                "translated_title": str(current.get("translated_title", "")),
+                "publication_title": str(current.get("publication_title", "")),
+                "publisher": str(current.get("publisher", "")),
+                "publication_place": str(current.get("publication_place", "")),
+                "school": school,
+                "institution": institution,
+                "conference_name": str(current.get("conference_name", "")),
+                "conference_place": str(current.get("conference_place", "")),
+                "degree": str(current.get("degree", "")) if normalized_entry_type == "thesis" else "",
+                "edition": str(current.get("edition", "")),
+                "standard_number": str(current.get("number", "")) if normalized_entry_type == "standard" else "",
+                "patent_number": str(current.get("number", "")) if normalized_entry_type == "patent" else "",
+                "report_number": str(current.get("number", "")) if normalized_entry_type == "report" else "",
+                "year": year,
+                "month": str(current.get("month", "")) or month,
+                "day": str(current.get("day", "")) or day,
+                "volume": str(current.get("volume", "")),
+                "issue": str(current.get("issue", "")),
+                "pages": str(current.get("pages", "")),
+                "doi": str(current.get("doi", "")),
+                "isbn": str(current.get("isbn", "")),
+                "url": str(current.get("url", "")),
+                "access_date": str(current.get("access_date", "")),
+                "language": str(current.get("language", "")),
+                "keywords": ", ".join(current.get("keywords", [])),
+                "summary": str(current.get("summary", "")),
+                "abstract": str(current.get("abstract", "")),
+                "remarks": str(current.get("remarks", "")),
+                "cite_key": str(current.get("cite_key", "")),
+                "authors": list(current.get("authors", [])),
+                "translators": ", ".join(current.get("translators", [])),
+                "editors": ", ".join(current.get("editors", [])),
+                "tags": [],
+                "source_provider": "RIS",
+            }
+            entries.append(prune_metadata_payload(payload, entry_type=payload.get("entry_type")))
             current = {}
-        elif key == "AU":
+        elif key in {"AU", "A1"}:
             current.setdefault("authors", []).append(value)
+        elif key in {"A2", "ED"}:
+            current.setdefault("editors", []).append(value)
+        elif key == "A3":
+            current.setdefault("translators", []).append(value)
         elif key == "KW":
             current.setdefault("keywords", []).append(value)
         elif key in {"TI", "T1"}:
             current["title"] = value
+        elif key == "ST":
+            current["subtitle"] = value
+        elif key == "TT":
+            current["translated_title"] = value
         elif key in {"T2", "JO", "JF"}:
             current["publication_title"] = value
+        elif key == "BT":
+            current.setdefault("publication_title", value)
         elif key == "PB":
             current["publisher"] = value
+            if str(current.get("type", "")).upper() == "THES":
+                current["school"] = value
         elif key == "CY":
-            current["school"] = value
-        elif key == "PY":
+            current["publication_place"] = value
+        elif key in {"PY", "Y1"}:
             current["year"] = value
+            current["date"] = value
+        elif key == "DA":
+            current["date"] = value
+        elif key == "Y2":
+            current["access_date"] = value
         elif key == "VL":
             current["volume"] = value
         elif key == "IS":
@@ -1317,10 +1670,18 @@ def parse_ris_text(content: str) -> list[dict]:
             current["isbn"] = value
         elif key == "UR":
             current["url"] = value
+        elif key == "ET":
+            current["edition"] = value
+        elif key == "M3":
+            current["number"] = value
+            current["degree"] = value
         elif key == "LA":
             current["language"] = value
+        elif key == "ID":
+            current["cite_key"] = value
         elif key == "N1":
             current["summary"] = value
+            current["remarks"] = value
         elif key in {"N2", "AB"}:
             current["abstract"] = value
     return entries
@@ -1401,7 +1762,7 @@ def infer_pdf_metadata(path: str | Path, settings: AppSettings | None = None) ->
     }
     if settings is not None and extracted_text.strip():
         payload["ocr_text_preview"] = summary
-    return payload
+    return prune_metadata_payload(payload, entry_type=payload.get("entry_type"))
 
 
 def scan_file(path: str | Path, settings: AppSettings | None = None) -> list[dict]:

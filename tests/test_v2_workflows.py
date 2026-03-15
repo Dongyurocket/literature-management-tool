@@ -32,6 +32,33 @@ class MetadataParsingTests(unittest.TestCase):
         self.assertEqual(entries[0]["title"], "Deep Learning Survey")
         self.assertEqual(entries[0]["doi"], "10.1000/test")
 
+    def test_parse_bib_text_reads_extended_fields(self):
+        content = """
+@book{Wang2024Book,
+  author = {Wang Lei},
+  editor = {Zhao Qian},
+  translator = {Li Ming},
+  title = {知识组织导论},
+  subtitle = {方法与实践},
+  titleaddon = {Introduction to Knowledge Organization},
+  publisher = {科学出版社},
+  location = {北京},
+  edition = {2},
+  year = {2024},
+  month = {03},
+  day = {15},
+  urldate = {2026-03-15}
+}
+"""
+        entries = parse_bib_text(content)
+        self.assertEqual(entries[0]["entry_type"], "book")
+        self.assertEqual(entries[0]["subtitle"], "方法与实践")
+        self.assertEqual(entries[0]["translated_title"], "Introduction to Knowledge Organization")
+        self.assertEqual(entries[0]["editors"], "Zhao Qian")
+        self.assertEqual(entries[0]["translators"], "Li Ming")
+        self.assertEqual(entries[0]["publication_place"], "北京")
+        self.assertEqual(entries[0]["edition"], "2")
+
     def test_parse_ris_text(self):
         content = """
 TY  - JOUR
@@ -46,6 +73,32 @@ ER  -
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["entry_type"], "journal_article")
         self.assertEqual(entries[0]["title"], "AI Survey")
+
+    def test_parse_ris_text_reads_extended_fields(self):
+        content = """
+TY  - THES
+AU  - Wang Lei
+A2  - Zhao Qian
+A3  - Li Ming
+TI  - Thesis Title
+ST  - Subtitle
+TT  - Translated Title
+PB  - Tsinghua University
+CY  - Beijing
+DA  - 2024-03-15
+M3  - Doctoral dissertation
+Y2  - 2026-03-15
+ID  - Wang2024Thesis
+ER  -
+"""
+        entries = parse_ris_text(content)
+        self.assertEqual(entries[0]["entry_type"], "thesis")
+        self.assertEqual(entries[0]["subtitle"], "Subtitle")
+        self.assertEqual(entries[0]["translated_title"], "Translated Title")
+        self.assertEqual(entries[0]["school"], "Tsinghua University")
+        self.assertEqual(entries[0]["publication_place"], "Beijing")
+        self.assertEqual(entries[0]["degree"], "Doctoral dissertation")
+        self.assertEqual(entries[0]["cite_key"], "Wang2024Thesis")
 
 
 class WorkflowTests(unittest.TestCase):

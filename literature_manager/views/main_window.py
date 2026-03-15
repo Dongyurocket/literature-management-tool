@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import APP_DISPLAY_NAME
 from ..desktop import open_path, reveal_path
+from ..metadata_fields import metadata_field_label, metadata_field_set, prune_metadata_payload
 from ..models import LiteratureTableModel
 from ..ocr_service import has_ocr_config
 from ..utils import (
@@ -661,6 +662,8 @@ class QtMainWindow(QMainWindow):
         publication_form.setSpacing(10)
         extra_form = QFormLayout()
         extra_form.setSpacing(10)
+        self._metadata_labels: dict[str, QLabel] = {}
+        self._metadata_field_widgets: dict[str, QWidget] = {}
 
         grid.addWidget(self._section_label("基础信息"), 0, 0)
         grid.addWidget(self._section_label("出版信息"), 0, 1)
@@ -683,10 +686,14 @@ class QtMainWindow(QMainWindow):
         for code, label in ENTRY_TYPE_LABELS.items():
             self.entry_type_combo.addItem(label, code)
         self.title_edit = QLineEdit(self)
+        self.subtitle_edit = QLineEdit(self)
         self.translated_title_edit = QLineEdit(self)
         self.authors_edit = QLineEdit(self)
+        self.translators_edit = QLineEdit(self)
+        self.editors_edit = QLineEdit(self)
         self.year_edit = QLineEdit(self)
         self.month_edit = QLineEdit(self)
+        self.day_edit = QLineEdit(self)
         self.subject_edit = QLineEdit(self)
         self.keywords_edit = QLineEdit(self)
         self.tags_edit = QLineEdit(self)
@@ -698,16 +705,23 @@ class QtMainWindow(QMainWindow):
 
         self.publication_title_edit = QLineEdit(self)
         self.publisher_edit = QLineEdit(self)
+        self.publication_place_edit = QLineEdit(self)
         self.school_edit = QLineEdit(self)
+        self.institution_edit = QLineEdit(self)
         self.conference_name_edit = QLineEdit(self)
+        self.conference_place_edit = QLineEdit(self)
+        self.degree_edit = QLineEdit(self)
+        self.edition_edit = QLineEdit(self)
         self.standard_number_edit = QLineEdit(self)
         self.patent_number_edit = QLineEdit(self)
+        self.report_number_edit = QLineEdit(self)
         self.volume_edit = QLineEdit(self)
         self.issue_edit = QLineEdit(self)
         self.pages_edit = QLineEdit(self)
         self.doi_edit = QLineEdit(self)
         self.isbn_edit = QLineEdit(self)
         self.url_edit = QLineEdit(self)
+        self.access_date_edit = QLineEdit(self)
         self.language_edit = QLineEdit(self)
         self.country_edit = QLineEdit(self)
 
@@ -719,42 +733,94 @@ class QtMainWindow(QMainWindow):
         self.remarks_edit = QTextEdit(self)
         self.remarks_edit.setFixedHeight(120)
 
-        basic_form.addRow("类型", self.entry_type_combo)
-        basic_form.addRow("标题", self.title_edit)
-        basic_form.addRow("译题", self.translated_title_edit)
-        basic_form.addRow("作者", self.authors_edit)
-        basic_form.addRow("年份", self.year_edit)
-        basic_form.addRow("月份", self.month_edit)
-        basic_form.addRow("主题", self.subject_edit)
-        basic_form.addRow("关键词", self.keywords_edit)
-        basic_form.addRow("标签", self.tags_edit)
-        basic_form.addRow("阅读状态", self.reading_status_combo)
-        basic_form.addRow("评分", self.rating_spin)
+        self._add_metadata_row(basic_form, "entry_type", self.entry_type_combo)
+        self._add_metadata_row(basic_form, "title", self.title_edit)
+        self._add_metadata_row(basic_form, "subtitle", self.subtitle_edit)
+        self._add_metadata_row(basic_form, "translated_title", self.translated_title_edit)
+        self._add_metadata_row(basic_form, "authors", self.authors_edit)
+        self._add_metadata_row(basic_form, "translators", self.translators_edit)
+        self._add_metadata_row(basic_form, "editors", self.editors_edit)
+        self._add_metadata_row(basic_form, "year", self.year_edit)
+        self._add_metadata_row(basic_form, "month", self.month_edit)
+        self._add_metadata_row(basic_form, "day", self.day_edit)
+        self._add_metadata_row(basic_form, "subject", self.subject_edit)
+        self._add_metadata_row(basic_form, "keywords", self.keywords_edit)
+        self._add_metadata_row(basic_form, "tags", self.tags_edit)
+        self._add_metadata_row(basic_form, "reading_status", self.reading_status_combo)
+        self._add_metadata_row(basic_form, "rating", self.rating_spin)
 
-        publication_form.addRow("刊名 / 书名", self.publication_title_edit)
-        publication_form.addRow("出版社", self.publisher_edit)
-        publication_form.addRow("学校", self.school_edit)
-        publication_form.addRow("会议", self.conference_name_edit)
-        publication_form.addRow("标准号", self.standard_number_edit)
-        publication_form.addRow("专利号", self.patent_number_edit)
-        publication_form.addRow("卷", self.volume_edit)
-        publication_form.addRow("期", self.issue_edit)
-        publication_form.addRow("页码", self.pages_edit)
-        publication_form.addRow("DOI", self.doi_edit)
-        publication_form.addRow("ISBN", self.isbn_edit)
-        publication_form.addRow("URL", self.url_edit)
-        publication_form.addRow("语言", self.language_edit)
-        publication_form.addRow("国家 / 地区", self.country_edit)
+        self._add_metadata_row(publication_form, "publication_title", self.publication_title_edit)
+        self._add_metadata_row(publication_form, "publisher", self.publisher_edit)
+        self._add_metadata_row(publication_form, "publication_place", self.publication_place_edit)
+        self._add_metadata_row(publication_form, "school", self.school_edit)
+        self._add_metadata_row(publication_form, "institution", self.institution_edit)
+        self._add_metadata_row(publication_form, "conference_name", self.conference_name_edit)
+        self._add_metadata_row(publication_form, "conference_place", self.conference_place_edit)
+        self._add_metadata_row(publication_form, "degree", self.degree_edit)
+        self._add_metadata_row(publication_form, "edition", self.edition_edit)
+        self._add_metadata_row(publication_form, "standard_number", self.standard_number_edit)
+        self._add_metadata_row(publication_form, "patent_number", self.patent_number_edit)
+        self._add_metadata_row(publication_form, "report_number", self.report_number_edit)
+        self._add_metadata_row(publication_form, "volume", self.volume_edit)
+        self._add_metadata_row(publication_form, "issue", self.issue_edit)
+        self._add_metadata_row(publication_form, "pages", self.pages_edit)
+        self._add_metadata_row(publication_form, "doi", self.doi_edit)
+        self._add_metadata_row(publication_form, "isbn", self.isbn_edit)
+        self._add_metadata_row(publication_form, "url", self.url_edit)
+        self._add_metadata_row(publication_form, "access_date", self.access_date_edit)
+        self._add_metadata_row(publication_form, "language", self.language_edit)
+        self._add_metadata_row(publication_form, "country", self.country_edit)
 
-        extra_form.addRow("引用键", self.cite_key_edit)
-        extra_form.addRow("简介", self.summary_edit)
-        extra_form.addRow("摘要", self.abstract_edit)
-        extra_form.addRow("备注", self.remarks_edit)
+        self._add_metadata_row(extra_form, "cite_key", self.cite_key_edit)
+        self._add_metadata_row(extra_form, "summary", self.summary_edit)
+        self._add_metadata_row(extra_form, "abstract", self.abstract_edit)
+        self._add_metadata_row(extra_form, "remarks", self.remarks_edit)
 
         self._connect_metadata_autosave()
+        self.entry_type_combo.currentIndexChanged.connect(self._on_entry_type_changed)
+        self._apply_entry_type_field_state(clear_hidden=False)
         scroll.setWidget(container)
         outer_layout.addWidget(scroll, stretch=1)
         return outer
+
+    def _add_metadata_row(self, form: QFormLayout, field: str, widget: QWidget) -> None:
+        label = QLabel(metadata_field_label(field))
+        form.addRow(label, widget)
+        self._metadata_labels[field] = label
+        self._metadata_field_widgets[field] = widget
+
+    def _current_entry_type(self) -> str:
+        return str(self.entry_type_combo.currentData() or "journal_article")
+
+    def _clear_metadata_widget(self, widget: QWidget) -> None:
+        if widget is self.entry_type_combo:
+            return
+        if isinstance(widget, QLineEdit):
+            widget.clear()
+            return
+        if isinstance(widget, QTextEdit):
+            widget.clear()
+            return
+        if isinstance(widget, QSpinBox):
+            widget.setValue(0)
+            return
+        if isinstance(widget, QComboBox):
+            widget.setCurrentIndex(0)
+
+    def _apply_entry_type_field_state(self, *, clear_hidden: bool) -> None:
+        entry_type = self._current_entry_type()
+        allowed_fields = metadata_field_set(entry_type)
+        for field, widget in self._metadata_field_widgets.items():
+            label = self._metadata_labels[field]
+            label.setText(metadata_field_label(field, entry_type))
+            visible = field in allowed_fields
+            label.setVisible(visible)
+            widget.setVisible(visible)
+            if clear_hidden and not visible:
+                self._clear_metadata_widget(widget)
+
+    def _on_entry_type_changed(self) -> None:
+        self._apply_entry_type_field_state(clear_hidden=not self._loading_metadata)
 
     def _build_notes_tab(self) -> QWidget:
         card = QWidget(self)
@@ -959,26 +1025,37 @@ class QtMainWindow(QMainWindow):
         widgets = [
             self.entry_type_combo,
             self.title_edit,
+            self.subtitle_edit,
             self.translated_title_edit,
             self.authors_edit,
+            self.translators_edit,
+            self.editors_edit,
             self.year_edit,
             self.month_edit,
+            self.day_edit,
             self.subject_edit,
             self.keywords_edit,
             self.tags_edit,
             self.reading_status_combo,
             self.publication_title_edit,
             self.publisher_edit,
+            self.publication_place_edit,
             self.school_edit,
+            self.institution_edit,
             self.conference_name_edit,
+            self.conference_place_edit,
+            self.degree_edit,
+            self.edition_edit,
             self.standard_number_edit,
             self.patent_number_edit,
+            self.report_number_edit,
             self.volume_edit,
             self.issue_edit,
             self.pages_edit,
             self.doi_edit,
             self.isbn_edit,
             self.url_edit,
+            self.access_date_edit,
             self.language_edit,
             self.country_edit,
             self.cite_key_edit,
@@ -1004,13 +1081,17 @@ class QtMainWindow(QMainWindow):
         self._metadata_save_timer.start()
 
     def _collect_metadata_payload(self) -> dict[str, object]:
-        return {
+        payload = {
             "entry_type": str(self.entry_type_combo.currentData()),
             "title": self.title_edit.text().strip(),
+            "subtitle": self.subtitle_edit.text().strip(),
             "translated_title": self.translated_title_edit.text().strip(),
             "authors": split_csv(self.authors_edit.text().replace("\n", ",")),
+            "translators": self.translators_edit.text().strip(),
+            "editors": self.editors_edit.text().strip(),
             "year": int(self.year_edit.text()) if self.year_edit.text().strip().isdigit() else None,
             "month": self.month_edit.text().strip(),
+            "day": self.day_edit.text().strip(),
             "subject": self.subject_edit.text().strip(),
             "keywords": self.keywords_edit.text().strip(),
             "tags": split_csv(self.tags_edit.text().replace("\n", ",")),
@@ -1018,16 +1099,23 @@ class QtMainWindow(QMainWindow):
             "rating": self.rating_spin.value() or None,
             "publication_title": self.publication_title_edit.text().strip(),
             "publisher": self.publisher_edit.text().strip(),
+            "publication_place": self.publication_place_edit.text().strip(),
             "school": self.school_edit.text().strip(),
+            "institution": self.institution_edit.text().strip(),
             "conference_name": self.conference_name_edit.text().strip(),
+            "conference_place": self.conference_place_edit.text().strip(),
+            "degree": self.degree_edit.text().strip(),
+            "edition": self.edition_edit.text().strip(),
             "standard_number": self.standard_number_edit.text().strip(),
             "patent_number": self.patent_number_edit.text().strip(),
+            "report_number": self.report_number_edit.text().strip(),
             "volume": self.volume_edit.text().strip(),
             "issue": self.issue_edit.text().strip(),
             "pages": self.pages_edit.text().strip(),
             "doi": self.doi_edit.text().strip(),
             "isbn": self.isbn_edit.text().strip(),
             "url": self.url_edit.text().strip(),
+            "access_date": self.access_date_edit.text().strip(),
             "language": self.language_edit.text().strip(),
             "country": self.country_edit.text().strip(),
             "summary": self.summary_edit.toPlainText().strip(),
@@ -1035,6 +1123,7 @@ class QtMainWindow(QMainWindow):
             "remarks": self.remarks_edit.toPlainText().strip(),
             "cite_key": self.cite_key_edit.text().strip(),
         }
+        return prune_metadata_payload(payload, entry_type=payload.get("entry_type"))
 
     def _metadata_is_dirty(self) -> bool:
         if self._metadata_snapshot is None:
@@ -1053,8 +1142,7 @@ class QtMainWindow(QMainWindow):
             self._collect_metadata_payload(),
         )
         self._update_detail_header(refreshed)
-        self.cite_key_edit.setText(refreshed.get("cite_key", "") or "")
-        self._metadata_snapshot = self.viewmodel.normalize_metadata_payload(refreshed)
+        self._populate_metadata(refreshed)
         self.metadata_save_label.setText("已保存")
         self.statusBar().showMessage("元数据已保存。", 2500)
 
@@ -1947,10 +2035,14 @@ class QtMainWindow(QMainWindow):
         self._loading_metadata = True
         self.entry_type_combo.setCurrentIndex(max(0, self.entry_type_combo.findData(detail.get("entry_type", "journal_article"))))
         self.title_edit.setText(detail.get("title", "") or "")
+        self.subtitle_edit.setText(detail.get("subtitle", "") or "")
         self.translated_title_edit.setText(detail.get("translated_title", "") or "")
         self.authors_edit.setText(join_csv(detail.get("authors", [])))
+        self.translators_edit.setText(detail.get("translators", "") or "")
+        self.editors_edit.setText(detail.get("editors", "") or "")
         self.year_edit.setText(str(detail.get("year") or ""))
         self.month_edit.setText(detail.get("month", "") or "")
+        self.day_edit.setText(detail.get("day", "") or "")
         self.subject_edit.setText(detail.get("subject", "") or "")
         self.keywords_edit.setText(detail.get("keywords", "") or "")
         self.tags_edit.setText(join_csv(detail.get("tags", [])))
@@ -1960,22 +2052,30 @@ class QtMainWindow(QMainWindow):
         self.rating_spin.setValue(int(detail.get("rating") or 0))
         self.publication_title_edit.setText(detail.get("publication_title", "") or "")
         self.publisher_edit.setText(detail.get("publisher", "") or "")
+        self.publication_place_edit.setText(detail.get("publication_place", "") or "")
         self.school_edit.setText(detail.get("school", "") or "")
+        self.institution_edit.setText(detail.get("institution", "") or "")
         self.conference_name_edit.setText(detail.get("conference_name", "") or "")
+        self.conference_place_edit.setText(detail.get("conference_place", "") or "")
+        self.degree_edit.setText(detail.get("degree", "") or "")
+        self.edition_edit.setText(detail.get("edition", "") or "")
         self.standard_number_edit.setText(detail.get("standard_number", "") or "")
         self.patent_number_edit.setText(detail.get("patent_number", "") or "")
+        self.report_number_edit.setText(detail.get("report_number", "") or "")
         self.volume_edit.setText(detail.get("volume", "") or "")
         self.issue_edit.setText(detail.get("issue", "") or "")
         self.pages_edit.setText(detail.get("pages", "") or "")
         self.doi_edit.setText(detail.get("doi", "") or "")
         self.isbn_edit.setText(detail.get("isbn", "") or "")
         self.url_edit.setText(detail.get("url", "") or "")
+        self.access_date_edit.setText(detail.get("access_date", "") or "")
         self.language_edit.setText(detail.get("language", "") or "")
         self.country_edit.setText(detail.get("country", "") or "")
         self.cite_key_edit.setText(detail.get("cite_key", "") or "")
         self.summary_edit.setPlainText(detail.get("summary", "") or "")
         self.abstract_edit.setPlainText(detail.get("abstract", "") or "")
         self.remarks_edit.setPlainText(detail.get("remarks", "") or "")
+        self._apply_entry_type_field_state(clear_hidden=False)
         self._metadata_snapshot = self.viewmodel.normalize_metadata_payload(detail)
         self.metadata_save_label.setText("已保存")
         self._loading_metadata = False
@@ -1984,10 +2084,14 @@ class QtMainWindow(QMainWindow):
         self._loading_metadata = True
         self.entry_type_combo.setCurrentIndex(0)
         self.title_edit.clear()
+        self.subtitle_edit.clear()
         self.translated_title_edit.clear()
         self.authors_edit.clear()
+        self.translators_edit.clear()
+        self.editors_edit.clear()
         self.year_edit.clear()
         self.month_edit.clear()
+        self.day_edit.clear()
         self.subject_edit.clear()
         self.keywords_edit.clear()
         self.tags_edit.clear()
@@ -1995,22 +2099,30 @@ class QtMainWindow(QMainWindow):
         self.rating_spin.setValue(0)
         self.publication_title_edit.clear()
         self.publisher_edit.clear()
+        self.publication_place_edit.clear()
         self.school_edit.clear()
+        self.institution_edit.clear()
         self.conference_name_edit.clear()
+        self.conference_place_edit.clear()
+        self.degree_edit.clear()
+        self.edition_edit.clear()
         self.standard_number_edit.clear()
         self.patent_number_edit.clear()
+        self.report_number_edit.clear()
         self.volume_edit.clear()
         self.issue_edit.clear()
         self.pages_edit.clear()
         self.doi_edit.clear()
         self.isbn_edit.clear()
         self.url_edit.clear()
+        self.access_date_edit.clear()
         self.language_edit.clear()
         self.country_edit.clear()
         self.cite_key_edit.clear()
         self.summary_edit.clear()
         self.abstract_edit.clear()
         self.remarks_edit.clear()
+        self._apply_entry_type_field_state(clear_hidden=False)
         self._metadata_snapshot = None
         self.metadata_save_label.setText("已保存")
         self._loading_metadata = False

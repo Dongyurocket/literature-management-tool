@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from ...config import AppSettings
 from ...dedupe_service import COMPARE_FIELDS, build_merge_preview
 from ...import_service import scan_import_sources
+from ...metadata_fields import metadata_field_label, metadata_fields_for_entry_type
 from ...utils import ENTRY_TYPE_LABELS, IMPORT_MODE_LABELS
 
 
@@ -49,18 +50,20 @@ class MetadataPreviewDialog(QDialog):
         text.setReadOnly(True)
         provider = payload.get("source_provider", "未知来源")
         fallback_chain = " -> ".join(payload.get("metadata_fallback_chain", []))
+        entry_type = payload.get("entry_type")
         preview_lines = [
             f"来源：{provider}",
-            f"标题：{payload.get('title', '')}",
-            f"作者：{' / '.join(payload.get('authors', []))}",
-            f"年份：{payload.get('year', '')}",
-            f"刊名/书名：{payload.get('publication_title', '')}",
-            f"出版社：{payload.get('publisher', '')}",
-            f"DOI：{payload.get('doi', '')}",
-            f"ISBN：{payload.get('isbn', '')}",
-            f"URL：{payload.get('url', '')}",
-            f"关键词：{payload.get('keywords', '')}",
+            f"类型：{_entry_type_label(str(entry_type or 'misc'))}",
         ]
+        for field in metadata_fields_for_entry_type(str(entry_type or "misc")):
+            if field in {"entry_type", "summary", "abstract", "remarks", "reading_status", "rating", "tags"}:
+                continue
+            if field == "authors":
+                value = " / ".join(payload.get("authors", []))
+            else:
+                value = str(payload.get(field, "") or "").strip()
+            if value:
+                preview_lines.append(f"{metadata_field_label(field, str(entry_type or 'misc'))}：{value}")
         if fallback_chain:
             preview_lines.append(f"回退链路：{fallback_chain}")
         if payload.get("metadata_lookup_notice"):

@@ -116,6 +116,32 @@ class LibraryControllerTests(unittest.TestCase):
                 self.assertEqual(merged["keywords"], "机器学习；深度学习")
                 self.assertEqual(merged["tags"], ["core", "new"])
 
+    def test_merge_metadata_payload_promotes_entry_type_and_prunes_hidden_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with build_controller(Path(tmp)) as controller:
+                merged = controller.merge_metadata_payload(
+                    {
+                        "entry_type": "misc",
+                        "title": "Imported Item",
+                        "authors": ["Alice"],
+                        "publisher": "",
+                        "volume": "12",
+                        "tags": [],
+                    },
+                    {
+                        "entry_type": "book",
+                        "publisher": "Science Press",
+                        "publication_place": "Beijing",
+                        "edition": "2",
+                        "volume": "99",
+                    },
+                )
+                self.assertEqual(merged["entry_type"], "book")
+                self.assertEqual(merged["publisher"], "Science Press")
+                self.assertEqual(merged["publication_place"], "Beijing")
+                self.assertEqual(merged["edition"], "2")
+                self.assertEqual(merged["volume"], "")
+
     def test_export_csl_json_updates_recent_export_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -78,21 +78,32 @@ class LiteratureRecord(TypedDict, total=False):
     id: int
     entry_type: str
     title: str
+    subtitle: str
     translated_title: str
+    editors: str
+    translators: str
     publication_title: str
     publisher: str
+    publication_place: str
     school: str
+    institution: str
     conference_name: str
+    conference_place: str
+    degree: str
+    edition: str
     standard_number: str
     patent_number: str
+    report_number: str
     year: int | None
     month: str
+    day: str
     volume: str
     issue: str
     pages: str
     doi: str
     isbn: str
     url: str
+    access_date: str
     language: str
     country: str
     subject: str
@@ -143,21 +154,32 @@ CREATE TABLE IF NOT EXISTS literatures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_type TEXT NOT NULL DEFAULT 'journal_article',
     title TEXT NOT NULL,
+    subtitle TEXT,
     translated_title TEXT,
+    editors TEXT,
+    translators TEXT,
     publication_title TEXT,
     publisher TEXT,
+    publication_place TEXT,
     school TEXT,
+    institution TEXT,
     conference_name TEXT,
+    conference_place TEXT,
+    degree TEXT,
+    edition TEXT,
     standard_number TEXT,
     patent_number TEXT,
+    report_number TEXT,
     year INTEGER,
     month TEXT,
+    day TEXT,
     volume TEXT,
     issue TEXT,
     pages TEXT,
     doi TEXT,
     isbn TEXT,
     url TEXT,
+    access_date TEXT,
     language TEXT,
     country TEXT,
     subject TEXT,
@@ -284,21 +306,32 @@ CREATE TABLE IF NOT EXISTS merge_history (
 LITERATURE_COLUMNS = [
     "entry_type",
     "title",
+    "subtitle",
     "translated_title",
+    "editors",
+    "translators",
     "publication_title",
     "publisher",
+    "publication_place",
     "school",
+    "institution",
     "conference_name",
+    "conference_place",
+    "degree",
+    "edition",
     "standard_number",
     "patent_number",
+    "report_number",
     "year",
     "month",
+    "day",
     "volume",
     "issue",
     "pages",
     "doi",
     "isbn",
     "url",
+    "access_date",
     "language",
     "country",
     "subject",
@@ -329,6 +362,17 @@ class LibraryDatabase:
         self.connection.close()
 
     def _apply_migrations(self) -> None:
+        self._ensure_column("literatures", "subtitle", "TEXT")
+        self._ensure_column("literatures", "editors", "TEXT")
+        self._ensure_column("literatures", "translators", "TEXT")
+        self._ensure_column("literatures", "publication_place", "TEXT")
+        self._ensure_column("literatures", "institution", "TEXT")
+        self._ensure_column("literatures", "conference_place", "TEXT")
+        self._ensure_column("literatures", "degree", "TEXT")
+        self._ensure_column("literatures", "edition", "TEXT")
+        self._ensure_column("literatures", "report_number", "TEXT")
+        self._ensure_column("literatures", "day", "TEXT")
+        self._ensure_column("literatures", "access_date", "TEXT")
         self._ensure_column("notes", "note_type", "TEXT NOT NULL DEFAULT 'text'")
         self._ensure_column("notes", "note_format", "TEXT NOT NULL DEFAULT 'text'")
         self._ensure_column("notes", "external_path", "TEXT")
@@ -338,7 +382,7 @@ class LibraryDatabase:
         self._ensure_column("attachments", "extracted_text", "TEXT")
         self._ensure_column("attachments", "text_extracted_at", "TEXT")
         self._ensure_search_table()
-        self.connection.execute("PRAGMA user_version = 3")
+        self.connection.execute("PRAGMA user_version = 4")
         self.connection.commit()
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:

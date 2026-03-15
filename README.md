@@ -43,9 +43,10 @@
 <td width="50%" valign="top">
 
 ### 文献与元数据
-- GB/T 7714 全字段覆盖（标题、作者、DOI、ISBN 等）
+- GB/T 7714-2015 全字段覆盖（副标题、译题、编者、译者、出版地、学位类别等）
 - 多源元数据抓取（Crossref · DataCite · OpenAlex · 知网 · USTC/THU OpenURL · OpenLibrary · Google Books）
 - 按配置顺序逐一回退，命中即停
+- 元数据编辑按文献类型动态收敛，只显示对应字段
 - DOI / ISBN / 标题自动补全
 - BibTeX · RIS · PDF · DOCX · Markdown 导入
 
@@ -134,20 +135,22 @@ python -m pip install -e ".[dev]"
 
 ### 1. 文献信息管理
 
-每条文献维护完整的结构化元数据，覆盖 GB/T 7714-2015 常见字段：
+每条文献维护完整的结构化元数据，覆盖 GB/T 7714-2015 全字段，并按文献类型自动裁剪编辑项：
 
-| 基础信息 | 出版信息 | 扩展信息 |
-|---------|---------|---------|
-| 文献类型（期刊论文 / 图书 / 学位论文 / 会议论文 / 标准 / 专利 / 报告 / 网页 / 其他） | 期刊 / 书名 / 会议名 | 主题、关键词 |
-| 标题、译名 / 副标题 | 出版社 / 学校 / 机构 | 一句话简介、摘要 |
-| 作者列表（保留顺序） | 年、月、卷、期、页码 | 阅读状态、评分 |
-| DOI、ISBN、URL | 语言、国家 / 地区 | 标签、引用键、备注 |
+| 基础信息 | 类型专属信息 | 扩展信息 |
+|---------|-------------|---------|
+| 文献类型（期刊论文 / 图书 / 学位论文 / 会议论文 / 标准 / 专利 / 报告 / 网页 / 其他） | 期刊：刊名、卷、期、页码 | 主题、关键词、标签 |
+| 标题、副标题、译题 | 图书：出版社、出版地、版次 | 摘要、简介、备注 |
+| 作者（保留顺序）、译者、编者 | 学位论文：学校、授予地、学位类别 | 阅读状态、评分、引用键 |
+| 年、月、日、DOI、ISBN、URL | 会议 / 标准 / 专利 / 报告 / 网页：会议地点、标准号、专利号、报告号、访问日期等 | 语言、国家 / 地区 |
 
 ### 2. 元数据抓取与补全
 
 - 支持 8 个元数据源，可在设置中自由勾选并排列优先级
 - 按配置顺序逐一尝试，**命中即停**，避免无意义请求和多源混合
 - DOI / ISBN 查询补全，查询失败时自动按标题回退检索
+- 抓取结果会自动映射到当前文献类型对应字段，兼容副标题、编者、译者、出版地、学位类别等扩展字段
+- 切换文献类型时自动隐藏并清空不适用字段，避免不同类型字段混填
 - 支持从知网抓取中文文章元数据
 - 支持从图书馆 OpenURL 解析器补充字段并保留检索链接
 
@@ -320,12 +323,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.5.1
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.6.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.5.1-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.6.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -343,7 +346,7 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 53 tests
+python -m unittest discover -s tests -v    # 61 tests
 
 # 或使用 pytest
 python -m pytest -q
@@ -355,6 +358,14 @@ python -m compileall main.py literature_manager
 ---
 
 ## 更新日志
+
+<details>
+<summary><b>V0.6.0</b> — GB/T 7714 元数据字段补全</summary>
+
+- 元数据模型补齐 GB/T 7714-2015 所需字段，新增副标题、编者、译者、出版地、机构、会议地点、学位类别、版次、报告号、访问日期等字段
+- 元数据编辑区改为按文献类型动态显示，只保留当前类型需要填写的字段，并在切换类型时自动清理不适用内容
+- 抓取、预览、合并、BibTeX / RIS 解析、GB/T / CSL 导出全部兼容上述字段扩展，抓取后仍可正确落入对应类型字段
+</details>
 
 <details>
 <summary><b>V0.5.1</b> — 更新提示文案与时间显示优化</summary>
