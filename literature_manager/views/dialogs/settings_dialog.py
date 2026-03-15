@@ -156,11 +156,21 @@ class SettingsDialog(QDialog):
         sources_layout = QGridLayout(sources_box)
         self.metadata_source_checks: dict[str, QCheckBox] = {}
         self._syncing_metadata_source_checks = False
-        configured_sources = [item for item in (settings.metadata_sources or []) if item in DEFAULT_METADATA_SOURCES]
-        selected_source = configured_sources[0] if configured_sources else DEFAULT_METADATA_SOURCES[0]
+        configured_sources: list[str] = []
+        seen_sources: set[str] = set()
+        for item in settings.metadata_sources or []:
+            source = str(item).strip()
+            if source not in DEFAULT_METADATA_SOURCES or source in seen_sources:
+                continue
+            seen_sources.add(source)
+            configured_sources.append(source)
+        self._metadata_source_order = configured_sources + [
+            source for source in DEFAULT_METADATA_SOURCES if source not in seen_sources
+        ]
+        selected_sources = set(configured_sources or [DEFAULT_METADATA_SOURCES[0]])
         for index, source_key in enumerate(DEFAULT_METADATA_SOURCES):
             checkbox = QCheckBox(METADATA_SOURCE_LABELS[source_key], self)
-            checkbox.setChecked(source_key == selected_source)
+            checkbox.setChecked(source_key in selected_sources)
             checkbox.toggled.connect(
                 lambda checked, key=source_key: self._on_metadata_source_toggled(key, checked)
             )
@@ -186,7 +196,7 @@ class SettingsDialog(QDialog):
 
     def value(self) -> AppSettings:
         selected_sources = [
-            key for key, checkbox in self.metadata_source_checks.items() if checkbox.isChecked()
+            key for key in self._metadata_source_order if self.metadata_source_checks[key].isChecked()
         ] or [DEFAULT_METADATA_SOURCES[0]]
         return AppSettings(
             library_root=self.library_root_edit.text().strip(),
@@ -208,13 +218,6 @@ class SettingsDialog(QDialog):
         if self._syncing_metadata_source_checks:
             return
         if checked:
-            self._syncing_metadata_source_checks = True
-            try:
-                for other_key, checkbox in self.metadata_source_checks.items():
-                    if other_key != source_key and checkbox.isChecked():
-                        checkbox.setChecked(False)
-            finally:
-                self._syncing_metadata_source_checks = False
             return
 
         if any(checkbox.isChecked() for checkbox in self.metadata_source_checks.values()):

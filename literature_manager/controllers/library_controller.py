@@ -60,14 +60,15 @@ class LibraryController:
         )
 
     def _preferred_metadata_sources(self) -> list[str]:
-        normalized = [
-            str(item).strip()
-            for item in (self.settings.metadata_sources or [])
-            if str(item).strip() in self._KNOWN_METADATA_SOURCES
-        ]
-        if not normalized:
-            return []
-        return [normalized[0]]
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in self.settings.metadata_sources or []:
+            source = str(item).strip()
+            if source not in self._KNOWN_METADATA_SOURCES or source in seen:
+                continue
+            seen.add(source)
+            normalized.append(source)
+        return normalized
 
     @classmethod
     def _is_effectively_empty(cls, key: str, value: Any) -> bool:

@@ -10,7 +10,11 @@ from unittest import mock
 
 from literature_manager.config import AppSettings, SettingsStore
 from literature_manager.controllers import LibraryController
-from literature_manager.metadata_service import extract_partial_metadata_from_html, lookup_title_metadata
+from literature_manager.metadata_service import (
+    extract_partial_metadata_from_html,
+    lookup_doi,
+    lookup_title_metadata,
+)
 from literature_manager.ocr_service import (
     extract_pdf_text_with_ocr,
     read_umi_ocr_server_port,
@@ -103,7 +107,7 @@ class MetadataFallbackTests(unittest.TestCase):
                 lookup_isbn_mock.assert_called_once()
                 self.assertEqual(payload["source_provider"], "OpenLibrary")
 
-    def test_controller_uses_only_one_selected_metadata_source(self):
+    def test_controller_passes_selected_metadata_sources_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_controller(Path(tmp)) as controller:
                 controller.settings.metadata_sources = ["crossref", "openalex", "cnki"]
@@ -124,9 +128,46 @@ class MetadataFallbackTests(unittest.TestCase):
                     _detail, payload = controller.lookup_metadata_for_literature(literature_id)
                 lookup_doi_mock.assert_called_once_with(
                     "10.1000/demo",
-                    preferred_sources=["crossref"],
+                    preferred_sources=["crossref", "openalex", "cnki"],
                 )
                 self.assertEqual(payload["source_provider"], "Crossref")
+
+    def test_lookup_doi_tries_selected_sources_in_order_until_success(self):
+        call_order: list[str] = []
+
+        def crossref_lookup(_doi: str) -> dict:
+            call_order.append("crossref")
+            raise ValueError("Crossref unavailable")
+
+        def openalex_lookup(_doi: str) -> dict:
+            call_order.append("openalex")
+            return {"title": "Ordered Result", "source_provider": "OpenAlex"}
+
+        def cnki_lookup(_doi: str) -> dict:
+            call_order.append("cnki")
+            return {"title": "Should Not Run", "source_provider": "CNKI"}
+
+        with mock.patch(
+            "literature_manager.metadata_service._lookup_doi_crossref",
+            side_effect=crossref_lookup,
+        ), mock.patch(
+            "literature_manager.metadata_service._lookup_doi_openalex",
+            side_effect=openalex_lookup,
+        ), mock.patch(
+            "literature_manager.metadata_service._lookup_doi_cnki",
+            side_effect=cnki_lookup,
+        ):
+            payload = lookup_doi(
+                "10.1000/demo",
+                preferred_sources=["crossref", "openalex", "cnki"],
+            )
+
+        self.assertEqual(call_order, ["crossref", "openalex"])
+        self.assertEqual(payload["source_provider"], "OpenAlex")
+        self.assertEqual(
+            payload["metadata_fallback_chain"],
+            ["crossref", "openalex", "cnki"],
+        )
 
 
 class MetadataProviderParsingTests(unittest.TestCase):

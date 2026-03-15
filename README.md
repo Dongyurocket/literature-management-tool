@@ -11,6 +11,16 @@
 最新发布页：[Releases](https://github.com/Dongyurocket/literature-management-tool/releases/latest)  
 安装版下载：请前往 [最新 Release](https://github.com/Dongyurocket/literature-management-tool/releases/latest) 获取 `Setup.exe`
 
+## V0.4.0 更新
+
+这一版聚焦元数据抓取体验，恢复元数据源多选，并按用户配置顺序逐一尝试抓取；一旦成功命中，就立即停止后续来源，避免无意义请求和多源混合结果。
+
+- 设置页恢复元数据源多选，可自由勾选需要参与回退的来源
+- 元数据抓取按已选来源顺序逐一尝试，命中即停，不再继续下一个来源
+- 保留来源顺序保存逻辑，重开设置后不会丢失你的回退优先级
+- 补充对应界面测试与服务层测试，覆盖多选顺序保存和“成功即停”的回退行为
+- 延续 `V0.3.5` 的安装包启动修复、`Pillow` 依赖补齐和 PyInstaller 打包稳定性改进
+
 ## V0.3.5 热修复
 
 这一版聚焦 Windows 安装包启动稳定性，修复部分打包结果里 `PIL` 包不完整，导致程序启动时直接报错 `module 'PIL' has no attribute '__version__'` 的问题。
@@ -456,19 +466,19 @@ winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-
 执行打包：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.3.5
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.4.0
 ```
 
 输出内容：
 
 - `dist\Literature management tool\`：PyInstaller 生成的可运行目录
-- `dist\Literature-management-tool-v0.3.5-Setup.exe`：带中文安装向导的 Windows 安装包
+- `dist\Literature-management-tool-v0.4.0-Setup.exe`：带中文安装向导的 Windows 安装包
 
 当前仓库版本已实际验证可生成 `Setup.exe`，并已通过静默安装 / 卸载烟雾测试，适合直接用于本地安装与 Release 上传。
 
 ### GitHub Actions 自动发布
 
-当推送形如 `v0.3.5` 的标签时：
+当推送形如 `v0.4.0` 的标签时：
 
 1. GitHub Actions 在 Windows runner 上检出代码
 2. 安装 Python 依赖和 Inno Setup
@@ -507,14 +517,14 @@ python -m pytest -q
 python -m compileall main.py literature_manager
 ```
 
-## 当前版本亮点（V0.3.5）
+## 当前版本亮点（V0.4.0）
 
-- 修复部分安装包启动即崩溃的问题，兼容 `PIL` 模块缺少 `__version__` 的异常场景
-- 打包时显式收集完整 `Pillow / PIL` 文件，避免 PyInstaller 生成残缺包目录
-- 运行时依赖补充 `Pillow`，让本地开发、CI 打包、Release 产物保持一致
-- 保留 `dev` extra 一键安装测试和打包依赖的能力
-- 数据库、MVVM、异步任务等 `V0.3.4` 稳定性改进继续保留
-- 全量 `unittest` / `pytest` 现已验证 `50` 项通过
+- 元数据源支持多选，并按配置顺序逐一回退尝试
+- 抓取到元数据后立即停止后续来源，减少不必要请求和混合结果
+- 设置页会保留多选来源的顺序，方便长期维护自己的抓取优先级
+- 安装包启动兼容性修复仍然保留，`Pillow / PIL` 打包更稳定
+- 开发环境继续支持 `python -m pip install -e ".[dev]"` 一键安装测试和打包依赖
+- 全量 `unittest` / `pytest` 现已验证 `51` 项通过
 
 ## 已知限制
 

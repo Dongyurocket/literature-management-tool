@@ -242,16 +242,17 @@ class QtMainWindowMetadataTests(unittest.TestCase):
 
 
 class SettingsDialogMetadataSourceTests(unittest.TestCase):
-    def test_metadata_source_is_single_select(self):
+    def test_metadata_source_supports_multi_select_and_preserves_order(self):
         dialog = SettingsDialog(
             AppSettings(metadata_sources=["openalex", "cnki"]),
             parent=None,
         )
         self.assertTrue(dialog.metadata_source_checks["openalex"].isChecked())
-        self.assertFalse(dialog.metadata_source_checks["cnki"].isChecked())
-        dialog.metadata_source_checks["cnki"].setChecked(True)
-        self.assertFalse(dialog.metadata_source_checks["openalex"].isChecked())
-        self.assertEqual(dialog.value().metadata_sources, ["cnki"])
+        self.assertTrue(dialog.metadata_source_checks["cnki"].isChecked())
+        dialog.metadata_source_checks["crossref"].setChecked(True)
+        self.assertEqual(dialog.value().metadata_sources, ["openalex", "cnki", "crossref"])
+        dialog.metadata_source_checks["openalex"].setChecked(False)
+        self.assertEqual(dialog.value().metadata_sources, ["cnki", "crossref"])
         dialog.close()
 
 
