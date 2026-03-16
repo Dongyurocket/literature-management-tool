@@ -22,14 +22,14 @@ from ...export_service import list_export_templates
 from ...utils import available_import_mode_labels
 
 METADATA_SOURCE_LABELS = {
-    "crossref": "Crossref?DOI?",
-    "datacite": "DataCite?DOI?",
-    "openalex": "OpenAlex?DOI / ???",
-    "cnki": "????????",
-    "ustc_openurl": "?????? OpenURL",
-    "tsinghua_openurl": "????? OpenURL",
-    "openlibrary": "OpenLibrary?ISBN?",
-    "googlebooks": "Google Books?ISBN?",
+    "crossref": "Crossref\uff08DOI\uff09",
+    "datacite": "DataCite\uff08DOI\uff09",
+    "openalex": "OpenAlex\uff08DOI / \u6807\u9898\uff09",
+    "cnki": "\u77e5\u7f51\uff08\u4e2d\u6587\u6587\u732e\uff09",
+    "ustc_openurl": "\u4e2d\u79d1\u5927\u56fe\u4e66\u9986 OpenURL",
+    "tsinghua_openurl": "\u6e05\u534e\u56fe\u4e66\u9986 OpenURL",
+    "openlibrary": "OpenLibrary\uff08ISBN\uff09",
+    "googlebooks": "Google Books\uff08ISBN\uff09",
 }
 
 
@@ -46,7 +46,7 @@ class SettingsDialog(QDialog):
         self._original = settings
         self._original_workspace_dir = workspace_dir.strip()
         self._workspace_locked = workspace_locked
-        self.setWindowTitle("??")
+        self.setWindowTitle("\u8bbe\u7f6e")
         self.resize(760, 640)
 
         layout = QVBoxLayout(self)
@@ -56,36 +56,38 @@ class SettingsDialog(QDialog):
         basic_form.setSpacing(12)
 
         self.library_root_edit = QLineEdit(settings.library_root, self)
-        self.library_root_edit.setPlaceholderText("??????????????????")
+        self.library_root_edit.setPlaceholderText(
+            "\u7559\u7a7a\u5219\u4f7f\u7528\u5f53\u524d\u6587\u5e93\u9ed8\u8ba4\u7684 library_files \u76ee\u5f55"
+        )
         library_row = QWidget(self)
         library_layout = QHBoxLayout(library_row)
         library_layout.setContentsMargins(0, 0, 0, 0)
         library_layout.addWidget(self.library_root_edit, stretch=1)
-        browse_library = QPushButton("??", self)
+        browse_library = QPushButton("\u6d4f\u89c8", self)
         browse_library.clicked.connect(self._browse_library_root)
         library_layout.addWidget(browse_library)
-        basic_form.addRow("????", library_row)
+        basic_form.addRow("\u6587\u5e93\u76ee\u5f55", library_row)
 
         self.import_mode_combo = QComboBox(self)
         self._populate_import_modes(settings.default_import_mode, settings.sync_mode_enabled)
-        basic_form.addRow("??????", self.import_mode_combo)
+        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u5165\u65b9\u5f0f", self.import_mode_combo)
 
         self.pdf_reader_edit = QLineEdit(settings.pdf_reader_path, self)
         reader_row = QWidget(self)
         reader_layout = QHBoxLayout(reader_row)
         reader_layout.setContentsMargins(0, 0, 0, 0)
         reader_layout.addWidget(self.pdf_reader_edit, stretch=1)
-        browse_reader = QPushButton("??", self)
+        browse_reader = QPushButton("\u6d4f\u89c8", self)
         browse_reader.clicked.connect(self._browse_pdf_reader)
         reader_layout.addWidget(browse_reader)
-        basic_form.addRow("PDF ???", reader_row)
+        basic_form.addRow("PDF \u9605\u8bfb\u5668", reader_row)
 
         self.theme_combo = QComboBox(self)
-        self.theme_combo.addItem("????", "system")
-        self.theme_combo.addItem("??", "light")
-        self.theme_combo.addItem("??", "dark")
+        self.theme_combo.addItem("\u8ddf\u968f\u7cfb\u7edf", "system")
+        self.theme_combo.addItem("\u6d45\u8272", "light")
+        self.theme_combo.addItem("\u6df1\u8272", "dark")
         self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(settings.ui_theme)))
-        basic_form.addRow("????", self.theme_combo)
+        basic_form.addRow("\u754c\u9762\u4e3b\u9898", self.theme_combo)
 
         self.export_template_combo = QComboBox(self)
         for key, label in list_export_templates().items():
@@ -93,13 +95,13 @@ class SettingsDialog(QDialog):
         self.export_template_combo.setCurrentIndex(
             max(0, self.export_template_combo.findData(settings.preferred_export_template))
         )
-        basic_form.addRow("??????", self.export_template_combo)
+        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u51fa\u6a21\u677f", self.export_template_combo)
 
         layout.addLayout(basic_form)
 
-        sync_group = QGroupBox("?????")
+        sync_group = QGroupBox("\u8de8\u8bbe\u5907\u540c\u6b65")
         sync_layout = QVBoxLayout(sync_group)
-        self.sync_mode_check = QCheckBox("???????????", self)
+        self.sync_mode_check = QCheckBox("\u542f\u7528\u8de8\u8bbe\u5907\u540c\u6b65\u53cb\u597d\u6a21\u5f0f", self)
         self.sync_mode_check.setChecked(settings.sync_mode_enabled)
         self.sync_mode_check.toggled.connect(self._on_sync_mode_toggled)
         sync_layout.addWidget(self.sync_mode_check)
@@ -111,33 +113,38 @@ class SettingsDialog(QDialog):
         workspace_row_layout = QHBoxLayout(workspace_row)
         workspace_row_layout.setContentsMargins(0, 0, 0, 0)
         workspace_row_layout.addWidget(self.workspace_edit, stretch=1)
-        browse_workspace = QPushButton("??", self)
+        browse_workspace = QPushButton("\u6d4f\u89c8", self)
         browse_workspace.setEnabled(not self._workspace_locked)
         browse_workspace.clicked.connect(self._browse_workspace_root)
         workspace_row_layout.addWidget(browse_workspace)
-        workspace_form.addRow("?????", workspace_row)
+        workspace_form.addRow("\u540c\u6b65\u5de5\u4f5c\u533a", workspace_row)
         sync_layout.addLayout(workspace_form)
 
         sync_tip_parts = [
-            "?????????????????OneDrive ??????????????????????",
-            "????????????????????????????????????",
+            "\u53ef\u5c06\u6574\u4e2a\u5de5\u4f5c\u533a\u8fc1\u79fb\u5230\u767e\u5ea6\u7f51\u76d8\u3001OneDrive \u7b49\u540c\u6b65\u76ee\u5f55\uff0c"
+            "\u4ee5\u4fbf\u5728\u591a\u53f0\u8bbe\u5907\u4e4b\u95f4\u540c\u6b65\u6570\u636e\u5e93\u3001\u8bbe\u7f6e\u548c\u9644\u4ef6\u3002",
+            "\u5efa\u8bae\u4fdd\u6301\u6587\u5e93\u76ee\u5f55\u4f4d\u4e8e\u5de5\u4f5c\u533a\u5185\uff1b"
+            "\u542f\u7528\u540e\u4f1a\u81ea\u52a8\u7981\u7528\u201c\u4ec5\u5173\u8054\u5916\u90e8\u6587\u4ef6\u201d\u3002",
         ]
         if self._workspace_locked:
-            sync_tip_parts.append("?????????? LITERATURE_MANAGER_HOME ???????????")
+            sync_tip_parts.append(
+                "\u5f53\u524d\u5de5\u4f5c\u533a\u7531\u73af\u5883\u53d8\u91cf LITERATURE_MANAGER_HOME \u56fa\u5b9a\uff0c"
+                "\u754c\u9762\u4e2d\u4e0d\u80fd\u4fee\u6539\u3002"
+            )
         sync_tip = QLabel("".join(sync_tip_parts))
         sync_tip.setWordWrap(True)
         sync_layout.addWidget(sync_tip)
         layout.addWidget(sync_group)
 
-        update_group = QGroupBox("??????")
+        update_group = QGroupBox("\u66f4\u65b0\u4e0e\u5143\u6570\u636e")
         update_layout = QVBoxLayout(update_group)
         update_form = QFormLayout()
 
         self.update_repo_edit = QLineEdit(settings.update_repo, self)
-        update_form.addRow("GitHub ??", self.update_repo_edit)
+        update_form.addRow("GitHub \u4ed3\u5e93", self.update_repo_edit)
         update_layout.addLayout(update_form)
 
-        sources_box = QGroupBox("???????")
+        sources_box = QGroupBox("\u5143\u6570\u636e\u56de\u9000\u987a\u5e8f")
         sources_layout = QGridLayout(sources_box)
         self.metadata_source_checks: dict[str, QCheckBox] = {}
         self._syncing_metadata_source_checks = False
@@ -165,8 +172,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(update_group)
 
         tip = QLabel(
-            "??/??????????????????????????"
-            "??? PDF ??????? PDF ??????"
+            "\u590d\u5236/\u79fb\u52a8\u5bfc\u5165\u4f1a\u628a\u6587\u4ef6\u5b58\u5165\u6587\u5e93\u76ee\u5f55\uff1b"
+            "\u4ec5\u5173\u8054\u4f1a\u4fdd\u7559\u539f\u59cb\u4f4d\u7f6e\u3002"
+            "\u81ea\u5b9a\u4e49 PDF \u9605\u8bfb\u5668\u4ec5\u5728\u6253\u5f00 PDF \u9644\u4ef6\u65f6\u751f\u6548\u3002"
         )
         tip.setWordWrap(True)
         layout.addWidget(tip)
@@ -231,20 +239,20 @@ class SettingsDialog(QDialog):
             self._syncing_metadata_source_checks = False
 
     def _browse_library_root(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "??????")
+        selected = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u6587\u5e93\u76ee\u5f55")
         if selected:
             self.library_root_edit.setText(selected)
 
     def _browse_workspace_root(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "?????????")
+        selected = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u540c\u6b65\u5de5\u4f5c\u533a")
         if selected:
             self.workspace_edit.setText(selected)
 
     def _browse_pdf_reader(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "?? PDF ???",
-            filter="????? (*.exe);;???? (*.*)",
+            "\u9009\u62e9 PDF \u9605\u8bfb\u5668",
+            filter="\u53ef\u6267\u884c\u6587\u4ef6 (*.exe);;\u6240\u6709\u6587\u4ef6 (*.*)",
         )
         if selected:
             self.pdf_reader_edit.setText(selected)

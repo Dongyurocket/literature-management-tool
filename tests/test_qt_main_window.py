@@ -370,6 +370,13 @@ class SettingsDialogMetadataSourceTests(unittest.TestCase):
         self.assertEqual(dialog.value().metadata_sources, ["cnki", "crossref"])
         dialog.close()
 
+    def test_settings_dialog_uses_human_readable_chinese_labels(self):
+        dialog = SettingsDialog(AppSettings(), parent=None)
+        self.assertEqual(dialog.windowTitle(), "\u8bbe\u7f6e")
+        self.assertEqual(dialog.sync_mode_check.text(), "\u542f\u7528\u8de8\u8bbe\u5907\u540c\u6b65\u53cb\u597d\u6a21\u5f0f")
+        self.assertEqual(dialog.metadata_source_checks["cnki"].text(), "\u77e5\u7f51\uff08\u4e2d\u6587\u6587\u732e\uff09")
+        dialog.close()
+
     def test_sync_mode_hides_link_import_mode(self):
         dialog = SettingsDialog(
             AppSettings(default_import_mode="link", sync_mode_enabled=True),
