@@ -118,6 +118,9 @@ class MainWindowViewModel:
     def set_library_archived(self, name: str, archived: bool) -> ProfileSummary:
         return self.controller.set_library_archived(name, archived)
 
+    def delete_library_profile(self, name: str, *, delete_files: bool = False) -> None:
+        self.controller.delete_library_profile(name, delete_files=delete_files)
+
     def search_literatures(self, query: str, limit: int = 100) -> list[SearchResult]:
         return self.controller.search_literatures(query, limit=limit)
 

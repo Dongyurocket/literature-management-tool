@@ -207,6 +207,9 @@ class LibraryController:
             item for item in self.settings_store.profile_summary() if item["name"] == name
         )
 
+    def delete_library_profile(self, name: str, *, delete_files: bool = False) -> None:
+        self.settings_store.delete_profile(name, delete_files=delete_files)
+
     def list_filter_values(self) -> dict[str, list[str]]:
         return self.database.list_filter_values()
 

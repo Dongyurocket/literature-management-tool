@@ -1500,6 +1500,7 @@ class QtMainWindow(QMainWindow):
             self._open_library_profiles()
             return
         if action == "switch":
+            self._flush_pending_metadata_changes()
             try:
                 summary = self.viewmodel.switch_library_profile(str(payload["name"]))
             except ValueError as exc:
@@ -1520,6 +1521,25 @@ class QtMainWindow(QMainWindow):
             self._refresh_after_library_change(navigation_key="all")
             state = "已归档" if summary["archived"] else "已恢复"
             self._show_toast("文库状态已更新", f"文库“{summary['name']}”{state}。", level="success")
+            self._open_library_profiles()
+        if action == "delete":
+            name = str(payload["name"])
+            answer = QMessageBox.question(
+                self,
+                "删除文库",
+                f"确定要删除文库“{name}”吗？\n\n选择 Yes 将同时删除文库目录和数据库文件。\n选择 No 仅删除注册记录，保留文件。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Cancel:
+                return
+            delete_files = answer == QMessageBox.StandardButton.Yes
+            try:
+                self.viewmodel.delete_library_profile(name, delete_files=delete_files)
+            except ValueError as exc:
+                QMessageBox.warning(self, "删除文库", str(exc))
+                return
+            self._show_toast("文库已删除", f"已删除文库“{name}”。", level="success")
             self._open_library_profiles()
 
     def _run_selected_pdf_ocr(self) -> None:
@@ -1570,6 +1590,7 @@ class QtMainWindow(QMainWindow):
         if self._current_literature_id is None:
             return
         literature_id = self._current_literature_id
+        self._flush_pending_metadata_changes()
         detail = self.viewmodel.detail_payload(literature_id)
         if not detail:
             return
@@ -1595,6 +1616,7 @@ class QtMainWindow(QMainWindow):
             preview = MetadataPreviewDialog(payload, self)
             if preview.exec() == 0:
                 return
+            self._flush_pending_metadata_changes()
             merged = self.viewmodel.apply_metadata_payload(literature_id, payload)
             if merged is None:
                 return
@@ -2032,7 +2054,7 @@ class QtMainWindow(QMainWindow):
                 files,
                 **dialog.value(),
             )
-        except ValueError as exc:
+        except Exception as exc:
             QMessageBox.warning(self, "添加附件", str(exc))
             return
         self._refresh_stats()

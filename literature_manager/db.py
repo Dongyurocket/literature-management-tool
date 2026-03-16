@@ -818,38 +818,41 @@ class LibraryDatabase:
             self.connection.execute("UPDATE attachments SET is_primary = 0 WHERE literature_id = ? AND role = ?", (literature_id, role))
 
         for file_name in files:
-            source = Path(file_name).expanduser().resolve()
-            if not source.exists():
+            try:
+                source = Path(file_name).expanduser().resolve()
+                if not source.exists():
+                    continue
+                final_path = source
+                if import_mode in {"copy", "move"} and target_dir is not None:
+                    final_path = ensure_unique_path(target_dir / source.name)
+                    if import_mode == "copy":
+                        shutil.copy2(source, final_path)
+                    else:
+                        shutil.move(str(source), str(final_path))
+                stored_path, is_relative = self._store_path(final_path)
+                extracted_text = self._extract_attachment_text(final_path)
+                cursor = self.connection.execute(
+                    "INSERT INTO attachments(literature_id, label, role, language, file_path, is_relative, is_primary, original_name, file_size, checksum, extracted_text, text_extracted_at, created_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        literature_id,
+                        final_path.name,
+                        role,
+                        language,
+                        stored_path,
+                        is_relative,
+                        1 if is_primary else 0,
+                        source.name,
+                        final_path.stat().st_size if final_path.exists() else 0,
+                        compute_checksum(final_path) if final_path.exists() else "",
+                        extracted_text,
+                        now_text() if extracted_text else "",
+                        now_text(),
+                    ),
+                )
+                created_ids.append(int(cursor.lastrowid))
+            except OSError:
                 continue
-            final_path = source
-            if import_mode in {"copy", "move"} and target_dir is not None:
-                final_path = ensure_unique_path(target_dir / source.name)
-                if import_mode == "copy":
-                    shutil.copy2(source, final_path)
-                else:
-                    shutil.move(str(source), str(final_path))
-            stored_path, is_relative = self._store_path(final_path)
-            extracted_text = self._extract_attachment_text(final_path)
-            cursor = self.connection.execute(
-                "INSERT INTO attachments(literature_id, label, role, language, file_path, is_relative, is_primary, original_name, file_size, checksum, extracted_text, text_extracted_at, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    literature_id,
-                    final_path.name,
-                    role,
-                    language,
-                    stored_path,
-                    is_relative,
-                    1 if is_primary else 0,
-                    source.name,
-                    final_path.stat().st_size if final_path.exists() else 0,
-                    compute_checksum(final_path),
-                    extracted_text,
-                    now_text() if extracted_text else "",
-                    now_text(),
-                ),
-            )
-            created_ids.append(int(cursor.lastrowid))
         self.connection.commit()
         self.refresh_search_index_for_literature(literature_id)
         self.connection.commit()

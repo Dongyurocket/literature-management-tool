@@ -602,26 +602,43 @@ class LibraryProfilesDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.table = QTableWidget(len(summaries), 5, self)
-        self.table.setHorizontalHeaderLabels(["当前", "名称", "状态", "文库目录", "数据库"])
+        self.table.setHorizontalHeaderLabels(["当前", "名称", "文献数", "状态", "文库目录"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 180)
+        self.table.setColumnWidth(2, 70)
+        self.table.setColumnWidth(3, 80)
+        self.table.doubleClicked.connect(self._request_switch)
         layout.addWidget(self.table)
 
         for row, item in enumerate(summaries):
             values = [
                 "是" if item.get("active") else "",
                 item.get("name", ""),
+                str(item.get("record_count", 0)),
                 "已归档" if item.get("archived") else "使用中",
                 item.get("library_root", ""),
-                item.get("database_path", ""),
             ]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(str(value))
                 if column == 1:
                     cell.setData(Qt.ItemDataRole.UserRole, item)
+                if column == 2:
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(row, column, cell)
+            if item.get("active"):
+                for column in range(5):
+                    cell = self.table.item(row, column)
+                    if cell:
+                        cell.setBackground(QColor("#e0f0ff"))
+            elif item.get("archived"):
+                for column in range(5):
+                    cell = self.table.item(row, column)
+                    if cell:
+                        cell.setForeground(QColor("#999999"))
         if summaries:
             self.table.selectRow(next((idx for idx, item in enumerate(summaries) if item.get("active")), 0))
 
@@ -629,10 +646,12 @@ class LibraryProfilesDialog(QDialog):
         new_button = buttons.addButton("新建文库", QDialogButtonBox.ButtonRole.ActionRole)
         switch_button = buttons.addButton("切换到所选", QDialogButtonBox.ButtonRole.ActionRole)
         archive_button = buttons.addButton("归档 / 恢复", QDialogButtonBox.ButtonRole.ActionRole)
+        delete_button = buttons.addButton("删除文库", QDialogButtonBox.ButtonRole.ActionRole)
         close_button = buttons.addButton(QDialogButtonBox.StandardButton.Close)
         new_button.clicked.connect(self._request_create)
         switch_button.clicked.connect(self._request_switch)
         archive_button.clicked.connect(self._request_archive_toggle)
+        delete_button.clicked.connect(self._request_delete)
         close_button.clicked.connect(self.reject)
         layout.addWidget(buttons)
 
@@ -669,6 +688,16 @@ class LibraryProfilesDialog(QDialog):
             "name": summary["name"],
             "archived": not bool(summary.get("archived")),
         }
+        self.accept()
+
+    def _request_delete(self) -> None:
+        summary = self._selected_summary()
+        if not summary:
+            return
+        if summary.get("active"):
+            QMessageBox.warning(self, "删除文库", "不能删除当前活动文库。请先切换到其他文库。")
+            return
+        self.action_payload = {"action": "delete", "name": summary["name"]}
         self.accept()
 
 

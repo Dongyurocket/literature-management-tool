@@ -273,6 +273,24 @@ class SettingsStore:
             return LibraryProfile(**profile)
         raise ValueError("未找到指定文库。")
 
+    def delete_profile(self, name: str, *, delete_files: bool = False) -> None:
+        registry = self._load_registry()
+        if registry.get("current_profile") == name:
+            raise ValueError("不能删除当前活动文库。")
+        profiles = registry.get("profiles", [])
+        target = next((p for p in profiles if p["name"] == name), None)
+        if target is None:
+            raise ValueError("未找到指定文库。")
+        if len(profiles) <= 1:
+            raise ValueError("至少需要保留一个文库。")
+        slug = target["slug"]
+        registry["profiles"] = [p for p in profiles if p["name"] != name]
+        self._save_registry(registry)
+        if delete_files:
+            profile_dir = self._profile_dir(slug)
+            if profile_dir.exists():
+                shutil.rmtree(profile_dir, ignore_errors=True)
+
     def profile_summary(self, *, include_archived: bool = True) -> list[dict[str, str | bool]]:
         current_name = self.current_profile().name
         summaries: list[dict[str, str | bool]] = []
@@ -286,6 +304,17 @@ class SettingsStore:
                 except (json.JSONDecodeError, OSError):
                     payload = {}
                 settings = AppSettings(**{**asdict(AppSettings()), **payload})
+            record_count = 0
+            db_path = profile_dir / "library.sqlite3"
+            if db_path.exists():
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(str(db_path))
+                    row = conn.execute("SELECT COUNT(*) FROM literatures").fetchone()
+                    record_count = row[0] if row else 0
+                    conn.close()
+                except Exception:
+                    record_count = 0
             summaries.append(
                 {
                     "name": profile.name,
@@ -295,6 +324,7 @@ class SettingsStore:
                     "database_path": str(profile_dir / "library.sqlite3"),
                     "settings_path": str(settings_path),
                     "library_root": settings.library_root,
+                    "record_count": record_count,
                 }
             )
         return summaries

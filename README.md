@@ -118,7 +118,7 @@ flowchart LR
 - Markdown / CSV / HTML 模板导出
 - 统计报表（Markdown · JSON）
 - 重复检测与字段级冲突合并
-- 缺失路径扫描与修复、备份恢复
+- 缺失路径扫描与修复、备份恢复（恢复前自动备份）
 
 </td>
 <td width="50%" valign="top">
@@ -128,7 +128,7 @@ flowchart LR
 - 惰性表格加载，大批量数据滚动流畅
 - 文件 / 文件夹拖拽导入
 - 后台异步任务 + 非阻塞 toast 提示
-- 多文库管理与归档
+- 多文库管理（新建、切换、归档、删除）
 - 软件内一键检查更新
 
 </td>
@@ -252,7 +252,7 @@ python -m pip install -e ".[dev]"
 - **全文检索**：覆盖元数据、文本笔记、docx 笔记、PDF 提取文本
 - **重复检测**：字段级冲突对比与合并预览
 - **路径修复**：丢失路径扫描 + 指定新目录批量修复
-- **备份恢复**：完整数据库与文献库备份
+- **备份恢复**：完整数据库与文献库备份，恢复前自动备份当前数据
 - **索引重建**：搜索索引一键重建
 
 ### 9. 多文库与归档
@@ -261,8 +261,10 @@ python -m pip install -e ".[dev]"
 |-----|------|
 | 独立数据库 | 每个文库拥有独立的 `library.sqlite3` |
 | 独立设置 | 每个文库拥有独立的 `settings.json` |
-| 快速切换 | 主界面直接切换当前文库 |
+| 快速切换 | 主界面直接切换当前文库，双击即可切换 |
+| 删除文库 | 可选同时删除文库目录和数据库文件 |
 | 归档库 | 不常用文库标记为归档，从日常工作流中隐藏 |
+| 文献统计 | 文库管理对话框显示各文库文献数量 |
 
 ### 10. 软件内更新
 
@@ -391,12 +393,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.7.2
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.8.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.7.2-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.8.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -427,7 +429,7 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-- 最新版本 `v0.7.2` 主要聚焦工具箱 UX、全文检索反馈、OCR / PDF 重命名提示，以及更新窗口展示优化。
+- 最新版本 `v0.8.0` 主要聚焦元数据合并修复、附件添加稳定性、文库管理功能增强与备份恢复安全性优化。
 - 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
 - 早期中文发布说明可参考 `docs/releases/`。
 

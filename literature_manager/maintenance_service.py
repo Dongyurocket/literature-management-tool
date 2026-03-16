@@ -93,6 +93,14 @@ def restore_backup(settings_store: SettingsStore, backup_path: str) -> AppSettin
     if not archive_path.exists():
         raise ValueError("备份文件不存在")
 
+    # 恢复前自动备份当前数据，防止误操作导致数据丢失
+    auto_backup_path = settings_store.base_dir / "auto_backup_before_restore.zip"
+    try:
+        settings = settings_store.load()
+        create_backup(settings_store, settings, str(auto_backup_path), include_library=False)
+    except Exception:
+        pass  # 自动备份失败不阻塞恢复流程
+
     restore_root = settings_store.base_dir / "restored_library"
     if restore_root.exists():
         shutil.rmtree(restore_root)
