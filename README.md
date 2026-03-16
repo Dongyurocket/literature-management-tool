@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
   <img src="https://img.shields.io/badge/storage-local--first-1f8f6a?style=flat-square" alt="Local First">
-  <img src="https://img.shields.io/badge/tests-71%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-72%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -58,7 +58,7 @@
   <sub>copy / move / link，适配不同资料整理习惯</sub>
 </td>
 <td align="center" width="25%">
-  <strong>71 项自动化测试</strong><br>
+  <strong>72 项自动化测试</strong><br>
   <sub>可用 `pytest` 与 `unittest` 双模式运行</sub>
 </td>
 </tr>
@@ -403,12 +403,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 1.1.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 1.1.1
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v1.1.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v1.1.1-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -426,10 +426,10 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 71 tests
+python -m unittest discover -s tests -v    # 72 tests
 
 # 或使用 pytest
-python -m pytest -q    # 71 tests
+python -m pytest -q    # 72 tests
 
 # 语法检查
 python -m compileall main.py literature_manager
@@ -439,7 +439,7 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-- 当前仓库已准备 `v1.1.0`，重点完成跨设备同步工作区、同步模式安全限制与 README / CHANGELOG 更新。
+- 当前仓库已准备 `v1.1.1`，这是一个热修复版本，重点修复设置对话框中文文案显示为问号的问题。
 - 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
 - 早期中文发布说明可参考 `docs/releases/`。
 
