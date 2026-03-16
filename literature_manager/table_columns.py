@@ -13,6 +13,8 @@ class LiteratureColumnSpec:
 
 AVAILABLE_LITERATURE_COLUMNS: tuple[LiteratureColumnSpec, ...] = (
     LiteratureColumnSpec("title", "标题", 360),
+    LiteratureColumnSpec("short_title", "短标题", 200),
+    LiteratureColumnSpec("translated_title", "译题", 300),
     LiteratureColumnSpec("year", "年份", 84, "center"),
     LiteratureColumnSpec("entry_type", "类型", 110),
     LiteratureColumnSpec("authors", "作者", 220),

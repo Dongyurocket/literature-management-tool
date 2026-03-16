@@ -160,6 +160,10 @@ class LiteratureTableModel(QAbstractTableModel):
     def _value_for_key(self, row: LiteratureTableRow, column_key: str) -> object:
         if column_key == "title":
             return row.title
+        if column_key == "translated_title":
+            return row.translated_title
+        if column_key == "short_title":
+            return row.short_title
         if column_key == "year":
             return row.year
         if column_key == "entry_type":

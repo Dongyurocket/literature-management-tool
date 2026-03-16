@@ -187,8 +187,8 @@ class LibraryController:
     def list_library_profiles(self, *, include_archived: bool = True) -> list[dict[str, Any]]:
         return self.settings_store.profile_summary(include_archived=include_archived)
 
-    def create_library_profile(self, name: str) -> dict[str, Any]:
-        profile = self.settings_store.create_profile(name, template_settings=self.settings)
+    def create_library_profile(self, name: str, *, library_root: str | None = None) -> dict[str, Any]:
+        profile = self.settings_store.create_profile(name, template_settings=self.settings, library_root=library_root)
         return next(
             item for item in self.settings_store.profile_summary() if item["name"] == profile.name
         )

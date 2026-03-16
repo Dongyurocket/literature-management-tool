@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS literatures (
     title TEXT NOT NULL,
     subtitle TEXT,
     translated_title TEXT,
+    short_title TEXT,
     editors TEXT,
     translators TEXT,
     publication_title TEXT,
@@ -308,6 +309,7 @@ LITERATURE_COLUMNS = [
     "title",
     "subtitle",
     "translated_title",
+    "short_title",
     "editors",
     "translators",
     "publication_title",
@@ -381,6 +383,7 @@ class LibraryDatabase:
         self._ensure_column("attachments", "file_size", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("attachments", "extracted_text", "TEXT")
         self._ensure_column("attachments", "text_extracted_at", "TEXT")
+        self._ensure_column("literatures", "short_title", "TEXT")
         self._ensure_search_table()
         self.connection.execute("PRAGMA user_version = 4")
         self.connection.commit()
@@ -809,8 +812,8 @@ class LibraryDatabase:
             raise ValueError("请先配置文库目录，再导入附件文件。")
 
         created_ids: list[int] = []
-        folder_name = build_storage_name(literature.get("authors", []), literature.get("year"), literature["title"])
-        target_dir = root / folder_name if root else None
+        last_error: str = ""
+        target_dir = root
         if target_dir:
             target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -821,6 +824,7 @@ class LibraryDatabase:
             try:
                 source = Path(file_name).expanduser().resolve()
                 if not source.exists():
+                    last_error = f"文件不存在：{file_name}"
                     continue
                 final_path = source
                 if import_mode in {"copy", "move"} and target_dir is not None:
@@ -851,11 +855,15 @@ class LibraryDatabase:
                     ),
                 )
                 created_ids.append(int(cursor.lastrowid))
-            except OSError:
+            except Exception as exc:
+                last_error = f"{Path(file_name).name}: {exc}"
                 continue
         self.connection.commit()
-        self.refresh_search_index_for_literature(literature_id)
-        self.connection.commit()
+        if created_ids:
+            self.refresh_search_index_for_literature(literature_id)
+            self.connection.commit()
+        elif last_error:
+            raise RuntimeError(last_error)
         return created_ids
 
     def get_attachments(self, literature_id: int) -> list[AttachmentRecord]:
@@ -1076,7 +1084,7 @@ class LibraryDatabase:
                 new_name = build_attachment_name(
                     literature.get("authors", []),
                     literature.get("year"),
-                    literature.get("title", ""),
+                    literature.get("short_title") or literature.get("title", ""),
                     attachment.get("role", "source"),
                     path.suffix,
                 )

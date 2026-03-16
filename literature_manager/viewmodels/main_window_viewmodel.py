@@ -30,6 +30,8 @@ class LiteratureTableRow:
     reading_status: str
     attachment_count: int
     note_count: int = 0
+    short_title: str = ""
+    translated_title: str = ""
     rating: int = 0
     tags: str = ""
     publication_title: str = ""
@@ -109,8 +111,8 @@ class MainWindowViewModel:
     def list_library_profiles(self, *, include_archived: bool = True) -> list[ProfileSummary]:
         return self.controller.list_library_profiles(include_archived=include_archived)
 
-    def create_library_profile(self, name: str) -> ProfileSummary:
-        return self.controller.create_library_profile(name)
+    def create_library_profile(self, name: str, *, library_root: str | None = None) -> ProfileSummary:
+        return self.controller.create_library_profile(name, library_root=library_root)
 
     def switch_library_profile(self, name: str) -> ProfileSummary:
         return self.controller.switch_library_profile(name)
@@ -396,6 +398,8 @@ class MainWindowViewModel:
                 reading_status=str(row.get("reading_status", "")),
                 attachment_count=int(row.get("attachment_count", 0)),
                 note_count=int(row.get("note_count", 0)),
+                short_title=str(row.get("short_title", "")),
+                translated_title=str(row.get("translated_title", "")),
                 rating=int(row.get("rating") or 0),
                 tags=str(row.get("tags_display", "")),
                 publication_title=str(row.get("publication_title", "")),

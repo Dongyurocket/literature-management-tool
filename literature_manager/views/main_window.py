@@ -805,6 +805,7 @@ class QtMainWindow(QMainWindow):
             self.entry_type_combo.addItem(label, code)
         self.title_edit = QLineEdit(self)
         self.subtitle_edit = QLineEdit(self)
+        self.short_title_edit = QLineEdit(self)
         self.translated_title_edit = QLineEdit(self)
         self.authors_edit = QLineEdit(self)
         self.translators_edit = QLineEdit(self)
@@ -854,6 +855,7 @@ class QtMainWindow(QMainWindow):
         self._add_metadata_row(basic_form, "entry_type", self.entry_type_combo)
         self._add_metadata_row(basic_form, "title", self.title_edit)
         self._add_metadata_row(basic_form, "subtitle", self.subtitle_edit)
+        self._add_metadata_row(basic_form, "short_title", self.short_title_edit)
         self._add_metadata_row(basic_form, "translated_title", self.translated_title_edit)
         self._add_metadata_row(basic_form, "authors", self.authors_edit)
         self._add_metadata_row(basic_form, "translators", self.translators_edit)
@@ -1212,6 +1214,7 @@ class QtMainWindow(QMainWindow):
             "entry_type": str(self.entry_type_combo.currentData()),
             "title": self.title_edit.text().strip(),
             "subtitle": self.subtitle_edit.text().strip(),
+            "short_title": self.short_title_edit.text().strip(),
             "translated_title": self.translated_title_edit.text().strip(),
             "authors": split_csv(self.authors_edit.text().replace("\n", ",")),
             "translators": self.translators_edit.text().strip(),
@@ -1492,7 +1495,7 @@ class QtMainWindow(QMainWindow):
         action = payload.get("action")
         if action == "create":
             try:
-                created = self.viewmodel.create_library_profile(str(payload["name"]))
+                created = self.viewmodel.create_library_profile(str(payload["name"]), library_root=payload.get("library_root"))
             except ValueError as exc:
                 QMessageBox.warning(self, "新建文库", str(exc))
                 return
@@ -2063,7 +2066,13 @@ class QtMainWindow(QMainWindow):
             self._current_literature_id,
             select_attachment_id=created_ids[0] if created_ids else None,
         )
-        self._show_toast("附件已添加", f"已添加 {len(created_ids)} 个附件。", level="success")
+        failed_count = len(files) - len(created_ids)
+        if failed_count == 0:
+            self._show_toast("附件已添加", f"已添加 {len(created_ids)} 个附件。", level="success")
+        elif created_ids:
+            self._show_toast("附件已添加", f"已添加 {len(created_ids)} 个附件，{failed_count} 个文件添加失败。", level="warning")
+        else:
+            self._show_toast("添加附件", f"所选 {len(files)} 个文件均添加失败，请检查文件是否存在或可访问。", level="warning")
 
     def _open_selected_attachment(self) -> None:
         attachment = self._selected_attachment_payload()
@@ -2232,6 +2241,7 @@ class QtMainWindow(QMainWindow):
         self.entry_type_combo.setCurrentIndex(max(0, self.entry_type_combo.findData(detail.get("entry_type", "journal_article"))))
         self.title_edit.setText(detail.get("title", "") or "")
         self.subtitle_edit.setText(detail.get("subtitle", "") or "")
+        self.short_title_edit.setText(detail.get("short_title", "") or "")
         self.translated_title_edit.setText(detail.get("translated_title", "") or "")
         self.authors_edit.setText(join_csv(detail.get("authors", [])))
         self.translators_edit.setText(detail.get("translators", "") or "")

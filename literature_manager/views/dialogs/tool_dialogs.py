@@ -666,11 +666,45 @@ class LibraryProfilesDialog(QDialog):
         return payload if isinstance(payload, dict) else None
 
     def _request_create(self) -> None:
-        name, ok = QInputDialog.getText(self, "新建文库", "请输入文库名称：")
-        if not ok or not name.strip():
+        dlg = QDialog(self)
+        dlg.setWindowTitle("新建文库")
+        dlg.resize(500, 150)
+        layout = QVBoxLayout(dlg)
+        form = QFormLayout()
+        name_edit = QLineEdit(dlg)
+        form.addRow("文库名称", name_edit)
+        root_row = QWidget(dlg)
+        root_layout = QHBoxLayout(root_row)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_edit = QLineEdit(dlg)
+        root_edit.setPlaceholderText("留空则使用默认路径")
+        root_layout.addWidget(root_edit, stretch=1)
+        browse_btn = QPushButton("浏览", dlg)
+        browse_btn.clicked.connect(lambda: self._browse_library_root_for(root_edit))
+        root_layout.addWidget(browse_btn)
+        form.addRow("文库目录", root_row)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dlg,
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec() == 0 or not name_edit.text().strip():
             return
-        self.action_payload = {"action": "create", "name": name.strip()}
+        payload: dict = {"action": "create", "name": name_edit.text().strip()}
+        root_text = root_edit.text().strip()
+        if root_text:
+            payload["library_root"] = root_text
+        self.action_payload = payload
         self.accept()
+
+    @staticmethod
+    def _browse_library_root_for(line_edit: QLineEdit) -> None:
+        selected = QFileDialog.getExistingDirectory(line_edit, "选择文库目录")
+        if selected:
+            line_edit.setText(selected)
 
     def _request_switch(self) -> None:
         summary = self._selected_summary()

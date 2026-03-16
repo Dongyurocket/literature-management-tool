@@ -200,7 +200,7 @@ class SettingsStore:
             return profiles
         return [item for item in profiles if not item.archived]
 
-    def create_profile(self, name: str, *, template_settings: AppSettings | None = None) -> LibraryProfile:
+    def create_profile(self, name: str, *, template_settings: AppSettings | None = None, library_root: str | None = None) -> LibraryProfile:
         profile_name = name.strip()
         if not profile_name:
             raise ValueError("文库名称不能为空。")
@@ -226,12 +226,13 @@ class SettingsStore:
         profile_dir.mkdir(parents=True, exist_ok=True)
         settings_path = profile_dir / "settings.json"
         if not settings_path.exists():
-            settings = AppSettings(library_root=self._default_library_root(slug))
+            effective_root = library_root if library_root else self._default_library_root(slug)
+            settings = AppSettings(library_root=effective_root)
             if template_settings is not None:
                 settings = AppSettings(
                     **{
                         **asdict(template_settings),
-                        "library_root": self._default_library_root(slug),
+                        "library_root": effective_root,
                     }
                 )
             current_settings_path = self.settings_path

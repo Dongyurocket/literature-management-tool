@@ -91,7 +91,7 @@ flowchart LR
 <td width="50%" valign="top">
 
 ### 文献与元数据
-- GB/T 7714-2015 全字段覆盖（副标题、译题、编者、译者、出版地、学位类别等）
+- GB/T 7714-2015 全字段覆盖（副标题、短标题、译题、编者、译者、出版地、学位类别等）
 - 多源元数据抓取（Crossref · DataCite · OpenAlex · 知网 · USTC/THU OpenURL · OpenLibrary · Google Books）
 - 按配置顺序逐一回退，命中即停
 - 元数据编辑按文献类型动态收敛，只显示对应字段
@@ -196,7 +196,7 @@ python -m pip install -e ".[dev]"
 | 基础信息 | 类型专属信息 | 扩展信息 |
 |---------|-------------|---------|
 | 文献类型（期刊论文 / 图书 / 学位论文 / 会议论文 / 标准 / 专利 / 报告 / 网页 / 其他） | 期刊：刊名、卷、期、页码 | 主题、关键词、标签 |
-| 标题、副标题、译题 | 图书：出版社、出版地、版次 | 摘要、简介、备注 |
+| 标题、副标题、短标题、译题 | 图书：出版社、出版地、版次 | 摘要、简介、备注 |
 | 作者（保留顺序）、译者、编者 | 学位论文：学校、授予地、学位类别 | 阅读状态、评分、引用键 |
 | 年、月、日、DOI、ISBN、URL | 会议 / 标准 / 专利 / 报告 / 网页：会议地点、标准号、专利号、报告号、访问日期等 | 语言、国家 / 地区 |
 
@@ -238,7 +238,7 @@ python -m pip install -e ".[dev]"
 
 ### 6. PDF 批量重命名
 
-按规则自动重命名：`作者_年份_标题_Original.pdf` / `作者_年份_标题_Translation.pdf`，同名冲突自动追加序号。
+按规则自动重命名：`作者_年份_标题_原文.pdf` / `作者_年份_标题_翻译.pdf`，同名冲突自动追加序号。若文献填写了**短标题**，则优先使用短标题生成文件名。
 
 ### 7. OCR 与扫描版 PDF
 
@@ -262,6 +262,7 @@ python -m pip install -e ".[dev]"
 | 独立数据库 | 每个文库拥有独立的 `library.sqlite3` |
 | 独立设置 | 每个文库拥有独立的 `settings.json` |
 | 快速切换 | 主界面直接切换当前文库，双击即可切换 |
+| 自定义目录 | 新建文库时可选择自定义文库存储路径 |
 | 删除文库 | 可选同时删除文库目录和数据库文件 |
 | 归档库 | 不常用文库标记为归档，从日常工作流中隐藏 |
 | 文献统计 | 文库管理对话框显示各文库文献数量 |
@@ -393,12 +394,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.8.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.9.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.8.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v0.9.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -429,7 +430,7 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-- 最新版本 `v0.8.0` 主要聚焦元数据合并修复、附件添加稳定性、文库管理功能增强与备份恢复安全性优化。
+- 最新版本 `v0.9.0` 主要聚焦附件添加修复、短标题与 PDF 重命名优化、文库自定义路径支持。
 - 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
 - 早期中文发布说明可参考 `docs/releases/`。
 
