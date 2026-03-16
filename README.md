@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
   <img src="https://img.shields.io/badge/storage-local--first-1f8f6a?style=flat-square" alt="Local First">
-  <img src="https://img.shields.io/badge/tests-67%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-71%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -41,7 +41,7 @@
 
 <a id="overview"></a>
 
-面向研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。使用 **Python + PySide6 + SQLite + pypdf** 构建，默认本地存储，无需服务器，开箱即用。
+面向研究生、教师、工程师和需要长期维护 PDF / 笔记 / BibTeX 数据的用户。使用 **Python + PySide6 + SQLite + pypdf** 构建，默认本地存储，无需服务器，开箱即用，也支持将整个工作区迁移到百度网盘等同步目录，实现跨设备连续使用。
 
 <table>
 <tr>
@@ -58,13 +58,13 @@
   <sub>copy / move / link，适配不同资料整理习惯</sub>
 </td>
 <td align="center" width="25%">
-  <strong>67 项自动化测试</strong><br>
+  <strong>71 项自动化测试</strong><br>
   <sub>可用 `pytest` 与 `unittest` 双模式运行</sub>
 </td>
 </tr>
 </table>
 
-> 适合希望把文献库、附件、笔记与导出流程统一在本地桌面应用中的用户。
+> 适合希望把文献库、附件、笔记与导出流程统一在本地桌面应用中，并在多台设备之间延续同一套工作区的用户。
 
 <a id="workflow"></a>
 ## 工作流一图看懂
@@ -220,6 +220,8 @@ python -m pip install -e ".[dev]"
 | `move` | 移动文件到文献库目录 |
 | `link` | 保留原始位置，仅记录关联 |
 
+启用“跨设备同步友好模式”后，程序会自动禁用 `link`，只保留 `copy` / `move`，避免另一台设备缺失本机绝对路径。
+
 ### 4. 笔记系统
 
 - 内置文本笔记与外部笔记文件（docx / md / txt）混合使用
@@ -269,9 +271,22 @@ python -m pip install -e ".[dev]"
 ## 首次使用
 
 1. 打开**设置**，指定**文献库目录**和默认导入方式
-2. 按需配置 **PDF 阅读器**路径
-3. 确认 GitHub 仓库配置（用于检查更新）
-4. 开始创建文献或导入已有资料
+2. 如需跨设备同步，勾选**跨设备同步友好模式**，并将**同步工作区**设置到百度网盘等同步盘中的空目录或已有工作区
+3. 按需配置 **PDF 阅读器**路径
+4. 确认 GitHub 仓库配置（用于检查更新）
+5. 开始创建文献或导入已有资料
+
+---
+
+## 跨设备同步（官方支持）
+
+1. 在设备 A 打开**设置**，勾选**跨设备同步友好模式**
+2. 将**同步工作区**切换到百度网盘同步空间、OneDrive、Dropbox、Syncthing 等目录，建议优先选择空目录
+3. 保持**文献库目录**位于工作区内（默认 `library_files` 即可），这样数据库、设置、附件和索引信息会一起同步
+4. 等同步完成后，在设备 B 首次打开软件时进入**设置**，选择同一个同步工作区
+5. 之后每台设备都会记住自己的工作区定位；同步模式下默认禁用 `link`，避免只记录本机文件路径
+
+> 建议同一时刻只在一台设备上编辑同一个工作区，待网盘同步完成后再切换到另一台设备继续使用。
 
 ---
 
@@ -290,7 +305,7 @@ python -m pip install -e ".[dev]"
 <summary><b>批量导入已有资料</b></summary>
 
 1. 点击「导入中心」或直接拖拽文件 / 文件夹到主窗口
-2. 审核扫描结果，选择导入方式（复制 / 移动 / 仅关联）
+2. 审核扫描结果，选择导入方式（复制 / 移动 / 仅关联；同步模式下仅复制 / 移动）
 3. 执行导入
 </details>
 
@@ -329,10 +344,13 @@ Literature management tool/
 └── profiles/
     └── <slug>/
         ├── library.sqlite3      # 文库数据库
-        └── settings.json        # 文库设置
+        ├── settings.json        # 文库设置
+        └── library_files/       # 文献附件目录
 ```
 
 可通过环境变量 `LITERATURE_MANAGER_HOME` 自定义数据目录。
+
+如需跨设备同步，推荐同步整个工作区目录，而不是只同步 `library_files/`。这样 `library_registry.json`、各文库的 `settings.json`、`library.sqlite3` 与附件目录会一起迁移。只要 `library_root` 保持在工作区内，程序会优先按相对路径保存，降低不同设备盘符或用户名差异带来的路径失效。
 
 ---
 
@@ -385,12 +403,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 1.1.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v1.0.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v1.1.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -408,10 +426,10 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 67 tests
+python -m unittest discover -s tests -v    # 71 tests
 
 # 或使用 pytest
-python -m pytest -q    # 67 tests
+python -m pytest -q    # 71 tests
 
 # 语法检查
 python -m compileall main.py literature_manager
@@ -421,7 +439,7 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-- 最新版本 `v1.0.0` 重点完成 OCR 功能移除、界面与 README 清理，以及版本号与发布流程统一。
+- 当前仓库已准备 `v1.1.0`，重点完成跨设备同步工作区、同步模式安全限制与 README / CHANGELOG 更新。
 - 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
 - 早期中文发布说明可参考 `docs/releases/`。
 
@@ -431,7 +449,7 @@ python -m compileall main.py literature_manager
 
 - PDF 元数据抽取为尽力而为，部分文档仍需手动补充信息
 - 查重合并策略偏保守，需人工确认
-- 当前不包含云同步
+- 当前提供基于同步工作区的跨设备同步，但不包含实时协同、冲突合并或多端同时编辑保护
 
 ---
 

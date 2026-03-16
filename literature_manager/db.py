@@ -355,11 +355,17 @@ class LibraryDatabase:
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute("PRAGMA busy_timeout = 5000")
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(SCHEMA)
         self._apply_migrations()
 
     def close(self) -> None:
+        try:
+            self.connection.commit()
+            self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
         self.connection.close()
 
     def _apply_migrations(self) -> None:
@@ -748,6 +754,19 @@ class LibraryDatabase:
         root.mkdir(parents=True, exist_ok=True)
         return root
 
+    def _sync_mode_enabled(self) -> bool:
+        if self._settings_getter is None:
+            return False
+        try:
+            settings = self._settings_getter()
+        except Exception:
+            return False
+        return bool(getattr(settings, "sync_mode_enabled", False))
+
+    def _ensure_sync_safe_import_mode(self, import_mode: str) -> None:
+        if self._sync_mode_enabled() and import_mode == "link":
+            raise ValueError("跨设备同步模式下不支持仅关联外部文件，请使用“复制到库”或“移动到库”。")
+
     def _store_path(self, path: Path) -> tuple[str, int]:
         path = path.resolve()
         root = self.library_root()
@@ -802,6 +821,7 @@ class LibraryDatabase:
         if not literature:
             raise ValueError("文献不存在。")
 
+        self._ensure_sync_safe_import_mode(import_mode)
         root = self.library_root()
         if import_mode in {"copy", "move"} and not root:
             raise ValueError("请先配置文库目录，再导入附件文件。")
@@ -903,6 +923,7 @@ class LibraryDatabase:
         if not source.exists():
             raise ValueError("笔记文件不存在。")
 
+        self._ensure_sync_safe_import_mode(import_mode)
         root = self.library_root()
         if import_mode in {"copy", "move"} and not root:
             raise ValueError("请先配置文库目录，再导入笔记文件。")
@@ -964,7 +985,7 @@ class LibraryDatabase:
         note_type: str = "text",
         note_format: str = "text",
         external_file_path: str = "",
-        import_mode: str = "link",
+        import_mode: str = "copy",
     ) -> int:
         literature = self.get_literature(literature_id)
         if not literature:

@@ -370,6 +370,18 @@ class SettingsDialogMetadataSourceTests(unittest.TestCase):
         self.assertEqual(dialog.value().metadata_sources, ["cnki", "crossref"])
         dialog.close()
 
+    def test_sync_mode_hides_link_import_mode(self):
+        dialog = SettingsDialog(
+            AppSettings(default_import_mode="link", sync_mode_enabled=True),
+            workspace_dir="C:\\sync-workspace",
+            parent=None,
+        )
+        modes = [dialog.import_mode_combo.itemData(index) for index in range(dialog.import_mode_combo.count())]
+        self.assertNotIn("link", modes)
+        self.assertEqual(dialog.value().default_import_mode, "copy")
+        self.assertEqual(dialog.workspace_dir(), "C:\\sync-workspace")
+        dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

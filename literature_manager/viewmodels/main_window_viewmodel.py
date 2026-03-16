@@ -84,6 +84,15 @@ class MainWindowViewModel:
     def save_settings(self, settings: AppSettings) -> None:
         self.controller.save_settings(settings)
 
+    def apply_settings(self, settings: AppSettings, *, workspace_dir: str | None = None) -> AppSettings:
+        return self.controller.apply_settings(settings, workspace_dir=workspace_dir)
+
+    def workspace_dir(self) -> str:
+        return self.controller.workspace_dir()
+
+    def is_workspace_locked(self) -> bool:
+        return self.controller.is_workspace_locked()
+
     def set_ui_theme(self, theme: str) -> str:
         return self.controller.set_ui_theme(theme)
 
@@ -150,7 +159,7 @@ class MainWindowViewModel:
         note_type: str = "text",
         note_format: str = "text",
         external_file_path: str = "",
-        import_mode: str = "link",
+        import_mode: str = "copy",
     ) -> int:
         return self.controller.save_note(
             literature_id=literature_id,

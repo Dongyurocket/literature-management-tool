@@ -20,6 +20,12 @@ IMPORT_MODE_LABELS = {
     "link": "仅关联外部文件",
 }
 
+
+def available_import_mode_labels(sync_mode_enabled: bool = False) -> dict[str, str]:
+    if not sync_mode_enabled:
+        return dict(IMPORT_MODE_LABELS)
+    return {key: label for key, label in IMPORT_MODE_LABELS.items() if key != "link"}
+
 NOTE_FORMAT_LABELS = {
     "text": "文本",
     "markdown": "Markdown",

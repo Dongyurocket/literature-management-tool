@@ -153,6 +153,32 @@ class LibraryController:
     def save_settings(self, settings: AppSettings) -> None:
         self.settings = settings
         self.settings_store.save(self.settings)
+        self.settings = self.settings_store.load()
+
+    def apply_settings(self, settings: AppSettings, *, workspace_dir: str | None = None) -> AppSettings:
+        target_workspace = (
+            Path(workspace_dir).expanduser().resolve()
+            if workspace_dir and workspace_dir.strip()
+            else self.settings_store.base_dir.resolve()
+        )
+        if target_workspace != self.settings_store.base_dir.resolve():
+            self.settings = settings
+            self.settings_store.save(self.settings)
+            self.database.close()
+            self.settings_store.relocate_base_dir(target_workspace)
+            self.settings = self.settings_store.load()
+            self.database = self._open_database()
+            self.database.rebuild_search_index()
+            return self.settings
+
+        self.save_settings(settings)
+        return self.settings
+
+    def workspace_dir(self) -> str:
+        return str(self.settings_store.base_dir)
+
+    def is_workspace_locked(self) -> bool:
+        return self.settings_store.is_workspace_locked()
 
     def clone(self, *, auto_rebuild_index: bool = False) -> "LibraryController":
         return LibraryController(

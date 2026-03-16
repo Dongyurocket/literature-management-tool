@@ -1298,15 +1298,34 @@ class QtMainWindow(QMainWindow):
         self._show_toast("已删除", f"文献 #{deleted_id} 已删除。", level="success")
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self.viewmodel.settings, self)
+        current_workspace = self.viewmodel.workspace_dir()
+        dialog = SettingsDialog(
+            self.viewmodel.settings,
+            workspace_dir=current_workspace,
+            workspace_locked=self.viewmodel.is_workspace_locked(),
+            parent=self,
+        )
         if dialog.exec() == 0:
             return
         settings = dialog.value()
-        self.viewmodel.save_settings(settings)
+        target_workspace = dialog.workspace_dir()
+        workspace_changed = Path(target_workspace).expanduser().resolve() != Path(current_workspace).expanduser().resolve()
+        try:
+            applied_settings = self.viewmodel.apply_settings(settings, workspace_dir=target_workspace)
+        except ValueError as exc:
+            QMessageBox.warning(self, "设置", str(exc))
+            return
         self._apply_metadata_autosave_preferences()
         self._apply_table_preferences()
-        self._apply_theme(settings.ui_theme)
-        self._show_toast("设置已保存", "已更新桌面偏好设置。", level="success")
+        self._apply_theme(applied_settings.ui_theme)
+        self._refresh_after_library_change(
+            preserve_id=self._current_literature_id,
+            navigation_key=self._current_navigation_key(),
+        )
+        message = "已更新桌面偏好设置。"
+        if workspace_changed:
+            message = "已更新设置并切换到新的同步工作区。"
+        self._show_toast("设置已保存", message, level="success")
 
     def _open_column_settings(self) -> None:
         self._persist_current_table_layout()

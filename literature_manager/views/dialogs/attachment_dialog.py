@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppSettings
-from ...utils import IMPORT_MODE_LABELS, ROLE_LABELS
+from ...utils import ROLE_LABELS, available_import_mode_labels
 
 
 class AttachmentDialog(QDialog):
@@ -32,7 +32,7 @@ class AttachmentDialog(QDialog):
         form.addRow("语言", self.language_edit)
 
         self.import_mode_combo = QComboBox(self)
-        for code, label in IMPORT_MODE_LABELS.items():
+        for code, label in available_import_mode_labels(settings.sync_mode_enabled).items():
             self.import_mode_combo.addItem(label, code)
         self.import_mode_combo.setCurrentIndex(
             max(0, self.import_mode_combo.findData(settings.default_import_mode))

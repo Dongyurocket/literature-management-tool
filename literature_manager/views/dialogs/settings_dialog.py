@@ -19,26 +19,35 @@ from PySide6.QtWidgets import (
 
 from ...config import AppSettings, DEFAULT_METADATA_SOURCES
 from ...export_service import list_export_templates
-from ...utils import IMPORT_MODE_LABELS
+from ...utils import available_import_mode_labels
 
 METADATA_SOURCE_LABELS = {
-    "crossref": "Crossref\uff08DOI\uff09",
-    "datacite": "DataCite\uff08DOI\uff09",
-    "openalex": "OpenAlex\uff08DOI / \u6807\u9898\uff09",
-    "cnki": "\u77e5\u7f51\uff08\u4e2d\u6587\u6587\u732e\uff09",
-    "ustc_openurl": "\u4e2d\u79d1\u5927\u56fe\u4e66\u9986 OpenURL",
-    "tsinghua_openurl": "\u6e05\u534e\u56fe\u4e66\u9986 OpenURL",
-    "openlibrary": "OpenLibrary\uff08ISBN\uff09",
-    "googlebooks": "Google Books\uff08ISBN\uff09",
+    "crossref": "Crossref?DOI?",
+    "datacite": "DataCite?DOI?",
+    "openalex": "OpenAlex?DOI / ???",
+    "cnki": "????????",
+    "ustc_openurl": "?????? OpenURL",
+    "tsinghua_openurl": "????? OpenURL",
+    "openlibrary": "OpenLibrary?ISBN?",
+    "googlebooks": "Google Books?ISBN?",
 }
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: AppSettings, parent=None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        workspace_dir: str = "",
+        workspace_locked: bool = False,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._original = settings
-        self.setWindowTitle("\u8bbe\u7f6e")
-        self.resize(760, 560)
+        self._original_workspace_dir = workspace_dir.strip()
+        self._workspace_locked = workspace_locked
+        self.setWindowTitle("??")
+        self.resize(760, 640)
 
         layout = QVBoxLayout(self)
 
@@ -47,39 +56,36 @@ class SettingsDialog(QDialog):
         basic_form.setSpacing(12)
 
         self.library_root_edit = QLineEdit(settings.library_root, self)
+        self.library_root_edit.setPlaceholderText("??????????????????")
         library_row = QWidget(self)
         library_layout = QHBoxLayout(library_row)
         library_layout.setContentsMargins(0, 0, 0, 0)
         library_layout.addWidget(self.library_root_edit, stretch=1)
-        browse_library = QPushButton("\u6d4f\u89c8", self)
+        browse_library = QPushButton("??", self)
         browse_library.clicked.connect(self._browse_library_root)
         library_layout.addWidget(browse_library)
-        basic_form.addRow("\u6587\u5e93\u76ee\u5f55", library_row)
+        basic_form.addRow("????", library_row)
 
         self.import_mode_combo = QComboBox(self)
-        for code, label in IMPORT_MODE_LABELS.items():
-            self.import_mode_combo.addItem(label, code)
-        self.import_mode_combo.setCurrentIndex(
-            max(0, self.import_mode_combo.findData(settings.default_import_mode))
-        )
-        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u5165\u65b9\u5f0f", self.import_mode_combo)
+        self._populate_import_modes(settings.default_import_mode, settings.sync_mode_enabled)
+        basic_form.addRow("??????", self.import_mode_combo)
 
         self.pdf_reader_edit = QLineEdit(settings.pdf_reader_path, self)
         reader_row = QWidget(self)
         reader_layout = QHBoxLayout(reader_row)
         reader_layout.setContentsMargins(0, 0, 0, 0)
         reader_layout.addWidget(self.pdf_reader_edit, stretch=1)
-        browse_reader = QPushButton("\u6d4f\u89c8", self)
+        browse_reader = QPushButton("??", self)
         browse_reader.clicked.connect(self._browse_pdf_reader)
         reader_layout.addWidget(browse_reader)
-        basic_form.addRow("PDF \u9605\u8bfb\u5668", reader_row)
+        basic_form.addRow("PDF ???", reader_row)
 
         self.theme_combo = QComboBox(self)
-        self.theme_combo.addItem("\u8ddf\u968f\u7cfb\u7edf", "system")
-        self.theme_combo.addItem("\u6d45\u8272", "light")
-        self.theme_combo.addItem("\u6df1\u8272", "dark")
+        self.theme_combo.addItem("????", "system")
+        self.theme_combo.addItem("??", "light")
+        self.theme_combo.addItem("??", "dark")
         self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(settings.ui_theme)))
-        basic_form.addRow("\u754c\u9762\u4e3b\u9898", self.theme_combo)
+        basic_form.addRow("????", self.theme_combo)
 
         self.export_template_combo = QComboBox(self)
         for key, label in list_export_templates().items():
@@ -87,19 +93,51 @@ class SettingsDialog(QDialog):
         self.export_template_combo.setCurrentIndex(
             max(0, self.export_template_combo.findData(settings.preferred_export_template))
         )
-        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u51fa\u6a21\u677f", self.export_template_combo)
+        basic_form.addRow("??????", self.export_template_combo)
 
         layout.addLayout(basic_form)
 
-        update_group = QGroupBox("\u66f4\u65b0\u4e0e\u5143\u6570\u636e")
+        sync_group = QGroupBox("?????")
+        sync_layout = QVBoxLayout(sync_group)
+        self.sync_mode_check = QCheckBox("???????????", self)
+        self.sync_mode_check.setChecked(settings.sync_mode_enabled)
+        self.sync_mode_check.toggled.connect(self._on_sync_mode_toggled)
+        sync_layout.addWidget(self.sync_mode_check)
+
+        workspace_form = QFormLayout()
+        self.workspace_edit = QLineEdit(self._original_workspace_dir, self)
+        self.workspace_edit.setReadOnly(self._workspace_locked)
+        workspace_row = QWidget(self)
+        workspace_row_layout = QHBoxLayout(workspace_row)
+        workspace_row_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_row_layout.addWidget(self.workspace_edit, stretch=1)
+        browse_workspace = QPushButton("??", self)
+        browse_workspace.setEnabled(not self._workspace_locked)
+        browse_workspace.clicked.connect(self._browse_workspace_root)
+        workspace_row_layout.addWidget(browse_workspace)
+        workspace_form.addRow("?????", workspace_row)
+        sync_layout.addLayout(workspace_form)
+
+        sync_tip_parts = [
+            "?????????????????OneDrive ??????????????????????",
+            "????????????????????????????????????",
+        ]
+        if self._workspace_locked:
+            sync_tip_parts.append("?????????? LITERATURE_MANAGER_HOME ???????????")
+        sync_tip = QLabel("".join(sync_tip_parts))
+        sync_tip.setWordWrap(True)
+        sync_layout.addWidget(sync_tip)
+        layout.addWidget(sync_group)
+
+        update_group = QGroupBox("??????")
         update_layout = QVBoxLayout(update_group)
         update_form = QFormLayout()
 
         self.update_repo_edit = QLineEdit(settings.update_repo, self)
-        update_form.addRow("GitHub \u4ed3\u5e93", self.update_repo_edit)
+        update_form.addRow("GitHub ??", self.update_repo_edit)
         update_layout.addLayout(update_form)
 
-        sources_box = QGroupBox("\u5143\u6570\u636e\u56de\u9000\u987a\u5e8f")
+        sources_box = QGroupBox("???????")
         sources_layout = QGridLayout(sources_box)
         self.metadata_source_checks: dict[str, QCheckBox] = {}
         self._syncing_metadata_source_checks = False
@@ -127,8 +165,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(update_group)
 
         tip = QLabel(
-            "\u590d\u5236/\u79fb\u52a8\u5bfc\u5165\u4f1a\u628a\u6587\u4ef6\u5b58\u5165\u6587\u5e93\u76ee\u5f55\uff1b\u4ec5\u5173\u8054\u4f1a\u4fdd\u7559\u539f\u59cb\u4f4d\u7f6e\u3002"
-            "\u81ea\u5b9a\u4e49 PDF \u9605\u8bfb\u5668\u4ec5\u5728\u6253\u5f00 PDF \u9644\u4ef6\u65f6\u751f\u6548\u3002"
+            "??/??????????????????????????"
+            "??? PDF ??????? PDF ??????"
         )
         tip.setWordWrap(True)
         layout.addWidget(tip)
@@ -141,6 +179,15 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _populate_import_modes(self, current_mode: str, sync_mode_enabled: bool) -> None:
+        previous = current_mode or str(self.import_mode_combo.currentData() or self._original.default_import_mode)
+        self.import_mode_combo.clear()
+        mode_labels = available_import_mode_labels(sync_mode_enabled)
+        for code, label in mode_labels.items():
+            self.import_mode_combo.addItem(label, code)
+        target_mode = previous if previous in mode_labels else "copy"
+        self.import_mode_combo.setCurrentIndex(max(0, self.import_mode_combo.findData(target_mode)))
+
     def value(self) -> AppSettings:
         selected_sources = [
             key for key in self._metadata_source_order if self.metadata_source_checks[key].isChecked()
@@ -148,6 +195,7 @@ class SettingsDialog(QDialog):
         return AppSettings(
             library_root=self.library_root_edit.text().strip(),
             default_import_mode=str(self.import_mode_combo.currentData()),
+            sync_mode_enabled=self.sync_mode_check.isChecked(),
             recent_export_dir=self._original.recent_export_dir,
             pdf_reader_path=self.pdf_reader_edit.text().strip(),
             ui_theme=str(self.theme_combo.currentData()),
@@ -159,6 +207,14 @@ class SettingsDialog(QDialog):
             list_columns=list(self._original.list_columns),
             list_column_widths=dict(self._original.list_column_widths),
         )
+
+    def workspace_dir(self) -> str:
+        if self._workspace_locked:
+            return self._original_workspace_dir
+        return self.workspace_edit.text().strip() or self._original_workspace_dir
+
+    def _on_sync_mode_toggled(self, checked: bool) -> None:
+        self._populate_import_modes(str(self.import_mode_combo.currentData()), checked)
 
     def _on_metadata_source_toggled(self, source_key: str, checked: bool) -> None:
         if self._syncing_metadata_source_checks:
@@ -175,15 +231,20 @@ class SettingsDialog(QDialog):
             self._syncing_metadata_source_checks = False
 
     def _browse_library_root(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u6587\u5e93\u76ee\u5f55")
+        selected = QFileDialog.getExistingDirectory(self, "??????")
         if selected:
             self.library_root_edit.setText(selected)
+
+    def _browse_workspace_root(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "?????????")
+        if selected:
+            self.workspace_edit.setText(selected)
 
     def _browse_pdf_reader(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "\u9009\u62e9 PDF \u9605\u8bfb\u5668",
-            filter="\u53ef\u6267\u884c\u6587\u4ef6 (*.exe);;\u6240\u6709\u6587\u4ef6 (*.*)",
+            "?? PDF ???",
+            filter="????? (*.exe);;???? (*.*)",
         )
         if selected:
             self.pdf_reader_edit.setText(selected)

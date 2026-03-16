@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-from literature_manager.config import AppSettings, SettingsStore
+from literature_manager.config import AppSettings, SettingsStore, resolve_app_home, resolve_app_home_locator_path
 from literature_manager.controllers import LibraryController
 from literature_manager.utils import now_text
 
@@ -28,6 +28,42 @@ def build_controller(root: Path):
 
 
 class LibraryControllerTests(unittest.TestCase):
+    def test_settings_store_persists_profile_relative_library_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict("os.environ", {"APPDATA": str(root / "appdata")}, clear=True):
+                store = SettingsStore()
+                profile_dir = store.settings_path.parent.resolve()
+                settings = AppSettings(
+                    library_root=str(profile_dir / "library_files"),
+                    sync_mode_enabled=True,
+                )
+                store.save(settings)
+
+                payload = json.loads(store.settings_path.read_text(encoding="utf-8"))
+                loaded = store.load()
+
+                self.assertEqual(payload["library_root"], "library_files")
+                self.assertTrue(loaded.sync_mode_enabled)
+                self.assertEqual(loaded.library_root, str((profile_dir / "library_files").resolve()))
+
+    def test_settings_store_can_relocate_workspace_with_locator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict("os.environ", {"APPDATA": str(root / "appdata")}, clear=True):
+                store = SettingsStore()
+                store.save(AppSettings(library_root=str(store.settings_path.parent / "library_files")))
+
+                target = root / "sync-workspace"
+                store.relocate_base_dir(target)
+
+                locator_payload = json.loads(resolve_app_home_locator_path().read_text(encoding="utf-8"))
+                reopened = SettingsStore()
+
+                self.assertEqual(locator_payload["app_home"], str(target.resolve()))
+                self.assertEqual(resolve_app_home(), target.resolve())
+                self.assertEqual(reopened.base_dir, target.resolve())
+
     def test_database_enables_wal_and_list_counts_use_joined_aggregates(self):
         with tempfile.TemporaryDirectory() as tmp:
             with build_controller(Path(tmp)) as controller:

@@ -207,6 +207,38 @@ class WorkflowTests(unittest.TestCase):
                     self.assertIn("library.sqlite3", archive.namelist())
                     self.assertIn("settings.json", archive.namelist())
 
+    def test_sync_mode_rejects_linked_external_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = AppSettings(
+                library_root=str(root / "library"),
+                default_import_mode="link",
+                sync_mode_enabled=True,
+            )
+            self.assertEqual(settings.default_import_mode, "copy")
+
+            db = LibraryDatabase(
+                root / "library.sqlite3",
+                lambda: settings.library_root,
+                lambda: settings,
+            )
+            literature_id = db.save_literature({"entry_type": "misc", "title": "同步测试", "authors": [], "tags": []})
+            note_path = root / "sync-note.txt"
+            note_path.write_text("sync-safe", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "跨设备同步模式"):
+                db.save_note(
+                    literature_id=literature_id,
+                    title="同步笔记",
+                    content="",
+                    attachment_ids=[],
+                    note_type="file",
+                    note_format="text",
+                    external_file_path=str(note_path),
+                    import_mode="link",
+                )
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

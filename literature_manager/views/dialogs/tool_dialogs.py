@@ -33,7 +33,7 @@ from ...config import AppSettings
 from ...dedupe_service import COMPARE_FIELDS, build_merge_preview
 from ...import_service import scan_import_sources
 from ...metadata_fields import metadata_field_label, metadata_fields_for_entry_type
-from ...utils import ENTRY_TYPE_LABELS, IMPORT_MODE_LABELS
+from ...utils import ENTRY_TYPE_LABELS, available_import_mode_labels
 
 
 def _entry_type_label(code: str) -> str:
@@ -466,7 +466,7 @@ class ImportCenterDialog(QDialog):
         folder_button = QPushButton("选择文件夹", self)
         folder_button.clicked.connect(self._pick_folder)
         self.import_mode_combo = QComboBox(self)
-        for code, label in IMPORT_MODE_LABELS.items():
+        for code, label in available_import_mode_labels(settings.sync_mode_enabled).items():
             self.import_mode_combo.addItem(label, code)
         self.import_mode_combo.setCurrentIndex(
             max(0, self.import_mode_combo.findData(settings.default_import_mode))
