@@ -149,16 +149,16 @@ class QtMainWindowAsyncTests(unittest.TestCase):
                 window._show_toast = capture_toast  # type: ignore[method-assign]
                 with run_async_immediately(window):
                     window._run_async_task(
-                        label="正在下载安装 Umi-OCR…",
+                        label="正在检查 GitHub 更新…",
                         task=lambda: {"ok": True},
                         on_result=broken_callback,
-                        error_title="安装 Umi-OCR 失败",
+                        error_title="检查更新失败",
                     )
 
                 self.assertEqual(window.busy_label.text(), "就绪")
                 self.assertTrue(
                     any(
-                        title == "安装 Umi-OCR 失败" and "界面回调失败" in message and level == "error"
+                        title == "检查更新失败" and "界面回调失败" in message and level == "error"
                         for title, message, level in toasts
                     )
                 )

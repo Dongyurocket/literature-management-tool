@@ -13,25 +13,23 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from ...config import AppSettings, DEFAULT_METADATA_SOURCES, DEFAULT_UMI_OCR_REPO
+from ...config import AppSettings, DEFAULT_METADATA_SOURCES
 from ...export_service import list_export_templates
 from ...utils import IMPORT_MODE_LABELS
 
 METADATA_SOURCE_LABELS = {
-    "crossref": "Crossref（DOI）",
-    "datacite": "DataCite（DOI）",
-    "openalex": "OpenAlex（DOI / 标题）",
-    "cnki": "知网（中文文章）",
-    "ustc_openurl": "中科大图书馆 OpenURL",
-    "tsinghua_openurl": "清华图书馆 OpenURL",
-    "openlibrary": "OpenLibrary（ISBN）",
-    "googlebooks": "Google Books（ISBN）",
+    "crossref": "Crossref\uff08DOI\uff09",
+    "datacite": "DataCite\uff08DOI\uff09",
+    "openalex": "OpenAlex\uff08DOI / \u6807\u9898\uff09",
+    "cnki": "\u77e5\u7f51\uff08\u4e2d\u6587\u6587\u732e\uff09",
+    "ustc_openurl": "\u4e2d\u79d1\u5927\u56fe\u4e66\u9986 OpenURL",
+    "tsinghua_openurl": "\u6e05\u534e\u56fe\u4e66\u9986 OpenURL",
+    "openlibrary": "OpenLibrary\uff08ISBN\uff09",
+    "googlebooks": "Google Books\uff08ISBN\uff09",
 }
 
 
@@ -39,9 +37,8 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
         self._original = settings
-        self.request_install_umi = False
-        self.setWindowTitle("设置")
-        self.resize(760, 620)
+        self.setWindowTitle("\u8bbe\u7f6e")
+        self.resize(760, 560)
 
         layout = QVBoxLayout(self)
 
@@ -54,10 +51,10 @@ class SettingsDialog(QDialog):
         library_layout = QHBoxLayout(library_row)
         library_layout.setContentsMargins(0, 0, 0, 0)
         library_layout.addWidget(self.library_root_edit, stretch=1)
-        browse_library = QPushButton("浏览", self)
+        browse_library = QPushButton("\u6d4f\u89c8", self)
         browse_library.clicked.connect(self._browse_library_root)
         library_layout.addWidget(browse_library)
-        basic_form.addRow("文库目录", library_row)
+        basic_form.addRow("\u6587\u5e93\u76ee\u5f55", library_row)
 
         self.import_mode_combo = QComboBox(self)
         for code, label in IMPORT_MODE_LABELS.items():
@@ -65,24 +62,24 @@ class SettingsDialog(QDialog):
         self.import_mode_combo.setCurrentIndex(
             max(0, self.import_mode_combo.findData(settings.default_import_mode))
         )
-        basic_form.addRow("默认导入方式", self.import_mode_combo)
+        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u5165\u65b9\u5f0f", self.import_mode_combo)
 
         self.pdf_reader_edit = QLineEdit(settings.pdf_reader_path, self)
         reader_row = QWidget(self)
         reader_layout = QHBoxLayout(reader_row)
         reader_layout.setContentsMargins(0, 0, 0, 0)
         reader_layout.addWidget(self.pdf_reader_edit, stretch=1)
-        browse_reader = QPushButton("浏览", self)
+        browse_reader = QPushButton("\u6d4f\u89c8", self)
         browse_reader.clicked.connect(self._browse_pdf_reader)
         reader_layout.addWidget(browse_reader)
-        basic_form.addRow("PDF 阅读器", reader_row)
+        basic_form.addRow("PDF \u9605\u8bfb\u5668", reader_row)
 
         self.theme_combo = QComboBox(self)
-        self.theme_combo.addItem("跟随系统", "system")
-        self.theme_combo.addItem("浅色", "light")
-        self.theme_combo.addItem("深色", "dark")
+        self.theme_combo.addItem("\u8ddf\u968f\u7cfb\u7edf", "system")
+        self.theme_combo.addItem("\u6d45\u8272", "light")
+        self.theme_combo.addItem("\u6df1\u8272", "dark")
         self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(settings.ui_theme)))
-        basic_form.addRow("界面主题", self.theme_combo)
+        basic_form.addRow("\u754c\u9762\u4e3b\u9898", self.theme_combo)
 
         self.export_template_combo = QComboBox(self)
         for key, label in list_export_templates().items():
@@ -90,69 +87,19 @@ class SettingsDialog(QDialog):
         self.export_template_combo.setCurrentIndex(
             max(0, self.export_template_combo.findData(settings.preferred_export_template))
         )
-        basic_form.addRow("默认导出模板", self.export_template_combo)
+        basic_form.addRow("\u9ed8\u8ba4\u5bfc\u51fa\u6a21\u677f", self.export_template_combo)
 
         layout.addLayout(basic_form)
 
-        ocr_group = QGroupBox("OCR / 扫描版 PDF")
-        ocr_layout = QFormLayout(ocr_group)
-        ocr_layout.setSpacing(10)
-
-        self.umi_ocr_path_edit = QLineEdit(settings.umi_ocr_path, self)
-        ocr_path_row = QWidget(self)
-        ocr_path_layout = QHBoxLayout(ocr_path_row)
-        ocr_path_layout.setContentsMargins(0, 0, 0, 0)
-        ocr_path_layout.addWidget(self.umi_ocr_path_edit, stretch=1)
-        browse_ocr = QPushButton("浏览", self)
-        browse_ocr.clicked.connect(self._browse_ocr_app)
-        ocr_path_layout.addWidget(browse_ocr)
-        install_ocr = QPushButton("下载安装", self)
-        install_ocr.clicked.connect(self._request_install_umi)
-        ocr_path_layout.addWidget(install_ocr)
-        ocr_layout.addRow("Umi-OCR 程序", ocr_path_row)
-
-        self.umi_ocr_variant_combo = QComboBox(self)
-        self.umi_ocr_variant_combo.addItem("Rapid（默认，体积更小）", "rapid")
-        self.umi_ocr_variant_combo.addItem("Paddle（更大，兼容性更高）", "paddle")
-        self.umi_ocr_variant_combo.setCurrentIndex(
-            max(0, self.umi_ocr_variant_combo.findData(settings.umi_ocr_variant))
-        )
-        ocr_layout.addRow("自动安装版本", self.umi_ocr_variant_combo)
-
-        self.umi_ocr_repo_edit = QLineEdit(settings.umi_ocr_repo or DEFAULT_UMI_OCR_REPO, self)
-        ocr_layout.addRow("Umi-OCR 仓库", self.umi_ocr_repo_edit)
-
-        self.umi_ocr_command_edit = QTextEdit(self)
-        self.umi_ocr_command_edit.setFixedHeight(80)
-        self.umi_ocr_command_edit.setPlainText(settings.umi_ocr_command)
-        self.umi_ocr_command_edit.setPlaceholderText(
-            '示例："{umi_ocr}" --input "{input}" --output "{output}"'
-        )
-        ocr_layout.addRow("自定义命令模板", self.umi_ocr_command_edit)
-
-        self.umi_ocr_timeout_spin = QSpinBox(self)
-        self.umi_ocr_timeout_spin.setRange(30, 1800)
-        self.umi_ocr_timeout_spin.setValue(int(settings.umi_ocr_timeout_sec or 180))
-        self.umi_ocr_timeout_spin.setSuffix(" 秒")
-        ocr_layout.addRow("OCR 超时", self.umi_ocr_timeout_spin)
-
-        ocr_tip = QLabel(
-            "如果命令模板留空，程序会自动启动并调用已安装的 Umi-OCR HTTP 接口。"
-            "如需改用你自己的脚本，也可以填写支持 {umi_ocr}、{input}、{output} 三个占位符的命令模板。"
-        )
-        ocr_tip.setWordWrap(True)
-        ocr_layout.addRow("", ocr_tip)
-        layout.addWidget(ocr_group)
-
-        update_group = QGroupBox("更新与元数据")
+        update_group = QGroupBox("\u66f4\u65b0\u4e0e\u5143\u6570\u636e")
         update_layout = QVBoxLayout(update_group)
         update_form = QFormLayout()
 
         self.update_repo_edit = QLineEdit(settings.update_repo, self)
-        update_form.addRow("GitHub 仓库", self.update_repo_edit)
+        update_form.addRow("GitHub \u4ed3\u5e93", self.update_repo_edit)
         update_layout.addLayout(update_form)
 
-        sources_box = QGroupBox("元数据回退顺序")
+        sources_box = QGroupBox("\u5143\u6570\u636e\u56de\u9000\u987a\u5e8f")
         sources_layout = QGridLayout(sources_box)
         self.metadata_source_checks: dict[str, QCheckBox] = {}
         self._syncing_metadata_source_checks = False
@@ -180,8 +127,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(update_group)
 
         tip = QLabel(
-            "复制/移动导入会把文件存入文库目录；仅关联会保留原始位置。"
-            "自定义 PDF 阅读器仅在打开 PDF 附件时生效。"
+            "\u590d\u5236/\u79fb\u52a8\u5bfc\u5165\u4f1a\u628a\u6587\u4ef6\u5b58\u5165\u6587\u5e93\u76ee\u5f55\uff1b\u4ec5\u5173\u8054\u4f1a\u4fdd\u7559\u539f\u59cb\u4f4d\u7f6e\u3002"
+            "\u81ea\u5b9a\u4e49 PDF \u9605\u8bfb\u5668\u4ec5\u5728\u6253\u5f00 PDF \u9644\u4ef6\u65f6\u751f\u6548\u3002"
         )
         tip.setWordWrap(True)
         layout.addWidget(tip)
@@ -204,11 +151,6 @@ class SettingsDialog(QDialog):
             recent_export_dir=self._original.recent_export_dir,
             pdf_reader_path=self.pdf_reader_edit.text().strip(),
             ui_theme=str(self.theme_combo.currentData()),
-            umi_ocr_path=self.umi_ocr_path_edit.text().strip(),
-            umi_ocr_repo=self.umi_ocr_repo_edit.text().strip() or DEFAULT_UMI_OCR_REPO,
-            umi_ocr_variant=str(self.umi_ocr_variant_combo.currentData()),
-            umi_ocr_command=self.umi_ocr_command_edit.toPlainText().strip(),
-            umi_ocr_timeout_sec=self.umi_ocr_timeout_spin.value(),
             update_repo=self.update_repo_edit.text().strip(),
             metadata_sources=selected_sources,
             preferred_export_template=str(self.export_template_combo.currentData()),
@@ -233,28 +175,15 @@ class SettingsDialog(QDialog):
             self._syncing_metadata_source_checks = False
 
     def _browse_library_root(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "选择文库目录")
+        selected = QFileDialog.getExistingDirectory(self, "\u9009\u62e9\u6587\u5e93\u76ee\u5f55")
         if selected:
             self.library_root_edit.setText(selected)
 
     def _browse_pdf_reader(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "选择 PDF 阅读器",
-            filter="可执行文件 (*.exe);;所有文件 (*.*)",
+            "\u9009\u62e9 PDF \u9605\u8bfb\u5668",
+            filter="\u53ef\u6267\u884c\u6587\u4ef6 (*.exe);;\u6240\u6709\u6587\u4ef6 (*.*)",
         )
         if selected:
             self.pdf_reader_edit.setText(selected)
-
-    def _browse_ocr_app(self) -> None:
-        selected, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择 Umi-OCR 程序",
-            filter="可执行文件 (*.exe);;所有文件 (*.*)",
-        )
-        if selected:
-            self.umi_ocr_path_edit.setText(selected)
-
-    def _request_install_umi(self) -> None:
-        self.request_install_umi = True
-        self.accept()

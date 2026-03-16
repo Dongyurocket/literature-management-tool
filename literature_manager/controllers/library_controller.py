@@ -21,7 +21,6 @@ from ..import_service import import_scanned_items, scan_import_sources
 from ..maintenance_service import create_backup, find_missing_paths, repair_missing_paths, restore_backup
 from ..metadata_fields import normalize_entry_type, prune_metadata_payload
 from ..metadata_service import lookup_doi, lookup_isbn, lookup_title_metadata
-from ..ocr_service import install_umi_ocr
 from ..update_service import check_latest_release, download_release_asset
 from ..utils import build_csl_entry, build_gbt_reference
 
@@ -259,22 +258,6 @@ class LibraryController:
     def delete_attachment(self, attachment_id: int, *, delete_file: bool) -> None:
         self.database.delete_attachment(attachment_id, delete_file=delete_file)
 
-    def reextract_attachment_texts(self, attachment_ids: list[int]) -> dict[str, int]:
-        updated = 0
-        skipped = 0
-        for attachment_id in attachment_ids:
-            attachment = self.get_attachment(attachment_id)
-            if not attachment:
-                skipped += 1
-                continue
-            path = str(attachment.get("resolved_path", ""))
-            if not path.lower().endswith(".pdf"):
-                skipped += 1
-                continue
-            self.database.refresh_attachment_text(attachment_id)
-            updated += 1
-        return {"updated": updated, "skipped": skipped}
-
     def get_note(self, note_id: int) -> dict[str, Any] | None:
         return self.database.get_note(note_id)
 
@@ -501,11 +484,6 @@ class LibraryController:
 
     def apply_pdf_renames(self, previews: list[dict[str, Any]]) -> int:
         return self.database.apply_pdf_renames(previews)
-
-    def install_umi_ocr(self) -> dict[str, Any]:
-        result = install_umi_ocr(self.settings)
-        self.settings_store.save(self.settings)
-        return result
 
     def check_for_updates(self) -> dict[str, Any]:
         return check_latest_release(self.settings.update_repo, __version__)

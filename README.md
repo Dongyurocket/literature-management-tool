@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="Qt">
   <img src="https://img.shields.io/badge/storage-local--first-1f8f6a?style=flat-square" alt="Local First">
-  <img src="https://img.shields.io/badge/tests-70%20passed-2d8f6f?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-67%20passed-2d8f6f?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -58,13 +58,13 @@
   <sub>copy / move / link，适配不同资料整理习惯</sub>
 </td>
 <td align="center" width="25%">
-  <strong>70 项自动化测试</strong><br>
+  <strong>67 项自动化测试</strong><br>
   <sub>可用 `pytest` 与 `unittest` 双模式运行</sub>
 </td>
 </tr>
 </table>
 
-> 适合希望把文献库、附件、笔记、OCR 与导出流程统一在本地桌面应用中的用户。
+> 适合希望把文献库、附件、笔记与导出流程统一在本地桌面应用中的用户。
 
 <a id="workflow"></a>
 ## 工作流一图看懂
@@ -75,7 +75,7 @@ flowchart LR
     B --> C["建档并关联附件 / 笔记"]
     C --> D["8 个元数据源补全"]
     D --> E["编辑字段 / 阅读状态 / 标签"]
-    E --> F["全文检索 / 去重 / OCR / 统计 / 维护"]
+    E --> F["全文检索 / 去重 / 统计 / 维护"]
     F --> G["BibTeX / CSL JSON / GB/T / Markdown / CSV / HTML 导出"]
 ```
 
@@ -174,7 +174,7 @@ python -m pip install -e ".[dev]"
 </td>
 <td align="center" width="40%">
   <img src="docs/screenshots/v0.7.2-settings.png" alt="设置页">
-  <br><sub>设置页 - 文库目录、导入方式、OCR、元数据源、更新</sub>
+  <br><sub>设置页 - 文库目录、导入方式、元数据源、更新</sub>
 </td>
 </tr>
 <tr>
@@ -240,14 +240,7 @@ python -m pip install -e ".[dev]"
 
 按规则自动重命名：`作者_年份_标题_原文.pdf` / `作者_年份_标题_翻译.pdf`，同名冲突自动追加序号。若文献填写了**短标题**，则优先使用短标题生成文件名。
 
-### 7. OCR 与扫描版 PDF
-
-- 内置 Umi-OCR 下载安装（Rapid / Paddle 两个发布包可选）
-- 自动定位 Umi-OCR 程序并调用 HTTP 文档识别接口
-- 也可自定义 OCR 命令模板（`{umi_ocr}` · `{input}` · `{output}` 占位符）
-- PDF 内置文本不足时，自动尝试 OCR 补充
-
-### 8. 检索、查重与维护
+### 7. 检索、查重与维护
 
 - **全文检索**：覆盖元数据、文本笔记、docx 笔记、PDF 提取文本
 - **重复检测**：字段级冲突对比与合并预览
@@ -255,7 +248,7 @@ python -m pip install -e ".[dev]"
 - **备份恢复**：完整数据库与文献库备份，恢复前自动备份当前数据
 - **索引重建**：搜索索引一键重建
 
-### 9. 多文库与归档
+### 8. 多文库与归档
 
 | 特性 | 说明 |
 |-----|------|
@@ -267,7 +260,7 @@ python -m pip install -e ".[dev]"
 | 归档库 | 不常用文库标记为归档，从日常工作流中隐藏 |
 | 文献统计 | 文库管理对话框显示各文库文献数量 |
 
-### 10. 软件内更新
+### 9. 软件内更新
 
 点击「检查更新」即可从 GitHub Release 获取新版本信息，查看更新日志并下载安装包。
 
@@ -277,9 +270,8 @@ python -m pip install -e ".[dev]"
 
 1. 打开**设置**，指定**文献库目录**和默认导入方式
 2. 按需配置 **PDF 阅读器**路径
-3. 如需扫描版 PDF 识别，在 `OCR / 扫描版 PDF` 中点击**下载安装**
-4. 确认 GitHub 仓库配置（用于检查更新）
-5. 开始创建文献或导入已有资料
+3. 确认 GitHub 仓库配置（用于检查更新）
+4. 开始创建文献或导入已有资料
 
 ---
 
@@ -354,7 +346,7 @@ flowchart TB
     C --> D["SQLite / library.sqlite3"]
     C --> E["Metadata Service"]
     C --> F["Import / Export / Dedupe Service"]
-    C --> G["OCR / Update / Maintenance Service"]
+    C --> G["Update / Maintenance Service"]
     C --> H["Desktop Integration"]
 ```
 
@@ -368,7 +360,6 @@ literature_manager/
 ├── models/              # QAbstractTableModel 数据模型
 ├── db.py                # SQLite 持久化（WAL 模式 + 索引优化）
 ├── metadata_service.py  # 多源元数据抓取与合并
-├── ocr_service.py       # Umi-OCR 集成
 ├── import_service.py    # 多格式导入（bib / ris / pdf / docx / md / txt）
 ├── export_service.py    # 多格式导出
 ├── dedupe_service.py    # 查重与合并
@@ -394,12 +385,12 @@ python -m pip install -e ".[dev]"
 winget install --id JRSoftware.InnoSetup -e --accept-source-agreements --accept-package-agreements
 
 # 执行打包
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 0.9.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -Version 1.0.0
 ```
 
 输出：
 - `dist\Literature management tool\` — PyInstaller 可运行目录
-- `dist\Literature-management-tool-v0.9.0-Setup.exe` — Windows 安装包
+- `dist\Literature-management-tool-v1.0.0-Setup.exe` — Windows 安装包
 
 ### GitHub Actions 自动发布
 
@@ -417,10 +408,10 @@ python -m pip install -e ".[dev]"
 
 # 运行全量单元测试
 $env:QT_QPA_PLATFORM='offscreen'
-python -m unittest discover -s tests -v    # 70 tests
+python -m unittest discover -s tests -v    # 67 tests
 
 # 或使用 pytest
-python -m pytest -q    # 70 tests
+python -m pytest -q    # 67 tests
 
 # 语法检查
 python -m compileall main.py literature_manager
@@ -430,7 +421,7 @@ python -m compileall main.py literature_manager
 
 ## 更新日志
 
-- 最新版本 `v0.9.0` 主要聚焦附件添加修复、短标题与 PDF 重命名优化、文库自定义路径支持。
+- 最新版本 `v1.0.0` 重点完成 OCR 功能移除、界面与 README 清理，以及版本号与发布流程统一。
 - 完整历史变更请查看 [`CHANGELOG.md`](CHANGELOG.md)。
 - 早期中文发布说明可参考 `docs/releases/`。
 
@@ -438,8 +429,7 @@ python -m compileall main.py literature_manager
 
 ## 已知限制
 
-- Umi-OCR 首次下载体积较大，需保持网络可用
-- PDF 元数据抽取为尽力而为，部分扫描版 PDF 需配合 OCR
+- PDF 元数据抽取为尽力而为，部分文档仍需手动补充信息
 - 查重合并策略偏保守，需人工确认
 - 当前不包含云同步
 
@@ -457,7 +447,6 @@ python -m compileall main.py literature_manager
 ## 后续方向
 
 - 更丰富的导出模板自定义能力
-- 更细的 OCR 参数面板与任务日志
 - 更强的批量元数据清洗规则
 - 更完整的合并冲突编辑器
 - 可选的局域网同步或团队协作

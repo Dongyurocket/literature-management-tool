@@ -16,11 +16,6 @@ from literature_manager.metadata_service import (
     lookup_doi,
     lookup_title_metadata,
 )
-from literature_manager.ocr_service import (
-    extract_pdf_text_with_ocr,
-    read_umi_ocr_server_port,
-    select_umi_ocr_asset,
-)
 from literature_manager.update_service import _build_fallback_notice, _format_published_at, check_latest_release
 
 
@@ -272,7 +267,7 @@ class MetadataProviderParsingTests(unittest.TestCase):
         self.assertEqual(payload["access_date"], "2026-03-16")
 
 
-class OcrAndUpdateTests(unittest.TestCase):
+class UpdateAndCompatibilityTests(unittest.TestCase):
     def test_metadata_service_import_tolerates_pil_without_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             pil_dir = Path(tmp) / "PIL"
@@ -299,31 +294,6 @@ class OcrAndUpdateTests(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(completed.stdout.strip(), "unknown")
-
-    def test_extract_pdf_text_with_ocr_returns_original_when_no_command(self):
-        settings = AppSettings()
-        self.assertEqual(extract_pdf_text_with_ocr("demo.pdf", "short text", settings), "short text")
-
-    def test_select_umi_ocr_asset_prefers_requested_variant(self):
-        assets = [
-            {"name": "Umi-OCR_Paddle_v2.1.5.7z.exe", "browser_download_url": "https://example.com/paddle.exe"},
-            {"name": "Umi-OCR_Rapid_v2.1.5.7z.exe", "browser_download_url": "https://example.com/rapid.exe"},
-        ]
-        selected = select_umi_ocr_asset(assets, "rapid")
-        self.assertIn("Rapid", selected["name"])
-
-    def test_read_umi_ocr_server_port_uses_pre_settings(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "Umi-OCR"
-            data_dir = root / "UmiOCR-data"
-            data_dir.mkdir(parents=True)
-            exe_path = root / "Umi-OCR.exe"
-            exe_path.write_text("", encoding="utf-8")
-            (data_dir / ".pre_settings").write_text(
-                '{"server_port": 1326}',
-                encoding="utf-8",
-            )
-            self.assertEqual(read_umi_ocr_server_port(exe_path), 1326)
 
     def test_check_latest_release_prefers_setup_asset(self):
         payload = {

@@ -21,7 +21,6 @@ from pypdf import PdfReader
 from . import __version__
 from .config import AppSettings
 from .metadata_fields import prune_metadata_payload
-from .ocr_service import extract_pdf_text_with_ocr
 from .utils import detect_note_format, extract_year, normalize_for_compare, sanitize_filename
 
 _logger = logging.getLogger(__name__)
@@ -1739,8 +1738,6 @@ def infer_pdf_metadata(path: str | Path, settings: AppSettings | None = None) ->
         _logger.warning("Failed to read PDF metadata from %s", file_path, exc_info=True)
 
     extracted_text = extract_pdf_text(file_path)
-    if settings is not None:
-        extracted_text = extract_pdf_text_with_ocr(file_path, extracted_text, settings)
     if not title:
         title = infer_title_from_filename(file_path)
     if not year:
@@ -1760,8 +1757,6 @@ def infer_pdf_metadata(path: str | Path, settings: AppSettings | None = None) ->
         "tags": [],
         "source_provider": "PDF",
     }
-    if settings is not None and extracted_text.strip():
-        payload["ocr_text_preview"] = summary
     return prune_metadata_payload(payload, entry_type=payload.get("entry_type"))
 
 

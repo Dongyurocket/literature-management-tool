@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import NotRequired, TypeAlias, TypedDict
 
 from .metadata_service import extract_pdf_text
-from .ocr_service import extract_pdf_text_with_ocr
 from .utils import (
     build_attachment_name,
     build_bibtex,
@@ -770,11 +769,7 @@ class LibraryDatabase:
     def _extract_attachment_text(self, path: Path) -> str:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
-            text = extract_pdf_text(path)
-            settings = self._settings_getter() if self._settings_getter is not None else None
-            if settings is not None:
-                return extract_pdf_text_with_ocr(path, text, settings)
-            return text
+            return extract_pdf_text(path)
         if suffix in {".docx", ".md", ".markdown", ".txt"}:
             return load_note_content(path)
         return ""

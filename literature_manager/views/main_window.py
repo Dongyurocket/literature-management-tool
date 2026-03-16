@@ -46,7 +46,6 @@ from ..config import APP_DISPLAY_NAME
 from ..desktop import open_parent_folder, open_path
 from ..metadata_fields import metadata_field_label, metadata_field_set, prune_metadata_payload
 from ..models import LiteratureTableModel
-from ..ocr_service import has_ocr_config
 from ..table_columns import literature_column_by_key
 from ..utils import (
     ENTRY_TYPE_LABELS,
@@ -390,7 +389,7 @@ class QtMainWindow(QMainWindow):
         library_name = profile.get("name", "默认文献库")
         archive_state = "（已归档）" if profile.get("archived") else ""
         self.header_subtitle.setText(
-            f"当前文库：{library_name}{archive_state}。支持拖拽导入、批量导出、OCR 识别、"
+            f"当前文库：{library_name}{archive_state}。支持拖拽导入、批量导出、全文检索、"
             "多元数据源回退、重复对比与 GitHub 更新。"
         )
 
@@ -653,7 +652,6 @@ class QtMainWindow(QMainWindow):
             ("导出模板", self._export_selected_template),
             ("复制 GB/T", self._copy_gbt_reference),
             ("PDF 重命名", self._rename_pdfs),
-            ("OCR 提取", self._run_selected_pdf_ocr),
             ("重复检测", self._open_dedupe_center),
             ("统计报表", self._show_statistics_dialog),
             ("文库管理", self._open_library_profiles),
@@ -1308,23 +1306,6 @@ class QtMainWindow(QMainWindow):
         self._apply_metadata_autosave_preferences()
         self._apply_table_preferences()
         self._apply_theme(settings.ui_theme)
-        if dialog.request_install_umi:
-            def handle_result(result) -> None:
-                self._reload_primary_controller()
-                self._show_toast(
-                    "Umi-OCR 已安装",
-                    f"已安装到 `{result['install_dir']}`，后续可直接用于扫描版 PDF 识别。",
-                    level="success",
-                    duration_ms=5200,
-                )
-
-            self._run_controller_task(
-                label="正在下载安装 Umi-OCR…",
-                controller_task=lambda controller: controller.install_umi_ocr(),
-                on_result=handle_result,
-                error_title="安装 Umi-OCR 失败",
-            )
-            return
         self._show_toast("设置已保存", "已更新桌面偏好设置。", level="success")
 
     def _open_column_settings(self) -> None:
@@ -1544,50 +1525,6 @@ class QtMainWindow(QMainWindow):
                 return
             self._show_toast("文库已删除", f"已删除文库“{name}”。", level="success")
             self._open_library_profiles()
-
-    def _run_selected_pdf_ocr(self) -> None:
-        preserve_id = self._current_literature_id
-        if not has_ocr_config(self.viewmodel.settings):
-            self._show_toast(
-                "OCR 提取",
-                "请先在“设置 → OCR / 扫描版 PDF”中配置 Umi-OCR 路径，或点击“下载安装”获取。",
-                level="warning",
-                duration_ms=4200,
-            )
-            return
-        literature_ids = self._selected_literature_ids() or ([self._current_literature_id] if self._current_literature_id else [])
-        if not literature_ids:
-            self._show_select_literature_toast("OCR 提取")
-            return
-        attachment_ids: list[int] = []
-        for literature_id in literature_ids:
-            detail = self.viewmodel.detail_payload(literature_id)
-            if not detail:
-                continue
-            for attachment in detail.get("attachments", []):
-                path = str(attachment.get("resolved_path", ""))
-                if path.lower().endswith(".pdf"):
-                    attachment_ids.append(int(attachment["id"]))
-        if not attachment_ids:
-            self._show_toast("OCR 提取", "当前选择中没有 PDF 附件。", level="warning")
-            return
-
-        def handle_result(result) -> None:
-            self._show_toast(
-                "OCR 提取完成",
-                f"已更新 {result['updated']} 个 PDF，跳过 {result['skipped']} 个附件。",
-                level="success",
-            )
-
-        self._run_controller_task(
-            label="正在执行 PDF OCR 提取…",
-            controller_task=lambda controller: controller.reextract_attachment_texts(attachment_ids),
-            on_result=handle_result,
-            reload_after=True,
-            refresh_after=True,
-            preserve_id=preserve_id,
-            error_title="OCR 提取失败",
-        )
 
     def _lookup_metadata(self) -> None:
         if self._current_literature_id is None:

@@ -19,7 +19,6 @@ ENV_HOME = "LITERATURE_MANAGER_HOME"
 DEFAULT_LIBRARY_NAME = "默认文献库"
 DEFAULT_LIBRARY_SLUG = "default-library"
 DEFAULT_UPDATE_REPO = "Dongyurocket/literature-management-tool"
-DEFAULT_UMI_OCR_REPO = "hiroi-sora/Umi-OCR"
 DEFAULT_METADATA_SOURCES = [
     "crossref",
     "datacite",
@@ -42,12 +41,6 @@ def resolve_app_home() -> Path:
     return Path.home() / f".{APP_NAME.lower()}"
 
 
-def resolve_tools_dir() -> Path:
-    tools_dir = resolve_app_home() / "tools"
-    tools_dir.mkdir(parents=True, exist_ok=True)
-    return tools_dir
-
-
 @dataclass(slots=True)
 class LibraryProfile:
     name: str
@@ -62,11 +55,6 @@ class AppSettings:
     recent_export_dir: str = ""
     pdf_reader_path: str = ""
     ui_theme: str = "system"
-    umi_ocr_path: str = ""
-    umi_ocr_repo: str = DEFAULT_UMI_OCR_REPO
-    umi_ocr_variant: str = "rapid"
-    umi_ocr_command: str = ""
-    umi_ocr_timeout_sec: int = 180
     update_repo: str = DEFAULT_UPDATE_REPO
     metadata_sources: list[str] = field(default_factory=lambda: list(DEFAULT_METADATA_SOURCES))
     preferred_export_template: str = "markdown_report"
@@ -107,6 +95,15 @@ class SettingsStore:
 
     def _default_library_root(self, slug: str) -> str:
         return str(self._profile_dir(slug) / "library_files")
+
+    def _build_app_settings(self, payload: dict | None = None, *, library_root: str | None = None) -> AppSettings:
+        defaults = asdict(AppSettings())
+        if library_root is not None:
+            defaults["library_root"] = library_root
+        if not isinstance(payload, dict):
+            return AppSettings(**defaults)
+        filtered = {key: value for key, value in payload.items() if key in defaults}
+        return AppSettings(**{**defaults, **filtered})
 
     def _load_registry(self) -> dict:
         if not self.registry_path.exists():
@@ -298,13 +295,16 @@ class SettingsStore:
         for profile in self.list_profiles(include_archived=include_archived):
             profile_dir = self._profile_dir(profile.slug)
             settings_path = profile_dir / "settings.json"
-            settings = AppSettings(library_root=self._default_library_root(profile.slug))
+            settings = self._build_app_settings(library_root=self._default_library_root(profile.slug))
             if settings_path.exists():
                 try:
                     payload = json.loads(settings_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     payload = {}
-                settings = AppSettings(**{**asdict(AppSettings()), **payload})
+                settings = self._build_app_settings(
+                    payload,
+                    library_root=self._default_library_root(profile.slug),
+                )
             record_count = 0
             db_path = profile_dir / "library.sqlite3"
             if db_path.exists():
@@ -337,7 +337,10 @@ class SettingsStore:
             payload = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return AppSettings(library_root=str(self.settings_path.parent / "library_files"))
-        return AppSettings(**{**asdict(AppSettings()), **payload})
+        return self._build_app_settings(
+            payload,
+            library_root=str(self.settings_path.parent / "library_files"),
+        )
 
     def save(self, settings: AppSettings) -> None:
         payload = asdict(settings)
